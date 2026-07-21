@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Banka İşlem Test Botu",
+  "version": "1.0.0",
+  "description": "Banka ödeme geçmişi verilerini özel seçicilerle okuma ve test etme eklentisi",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Banka İşlem Test Botu"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"]
+    }
+  ]
+}

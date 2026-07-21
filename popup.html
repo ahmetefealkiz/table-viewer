@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Banka İşlem İzleme Botu</title>
+  <link rel="stylesheet" href="popup.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-area">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M3 21h18M3 10h18M3 6l9-4 9 4M4 10v11M20 10v11M8 14v3M12 14v3M16 14v3"/>
+        </svg>
+        <span>İşlem İzleme Botu</span>
+      </div>
+      <div id="global-status-badge" class="badge badge-stopped">Durduruldu</div>
+    </header>
+
+    <!-- Navigation Tabs (İzleme Ekranı is default) -->
+    <nav class="tab-nav">
+      <button class="tab-btn active" data-tab="tracking">
+        <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline>
+        </svg>
+        İzleme Ekranı
+      </button>
+      <button class="tab-btn" data-tab="settings">
+        <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+        </svg>
+        Ayarlar
+      </button>
+    </nav>
+
+    <!-- Tab Contents -->
+    <main class="content-area">
+      <!-- İzleme Ekranı Tab Content (Default Active) -->
+      <section id="tab-tracking" class="tab-content active">
+        <div class="control-actions-grid">
+          <button id="btn-toggle-tracking" class="btn btn-start btn-full">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polygon points="5 3 19 12 5 21 5 3"></polygon>
+            </svg>
+            <span id="btn-toggle-text">İzlemeyi Başlat</span>
+          </button>
+          <button id="btn-force-read" class="btn btn-secondary">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+            </svg>
+            Şimdi Oku & Sıfırla
+          </button>
+        </div>
+
+        <div class="timer-display-bar">
+          <span class="timer-label">Sonraki Taramaya Kalan:</span>
+          <span id="countdown-timer" class="countdown-val">--</span>
+        </div>
+
+        <div id="tracking-status" class="status-banner hidden"></div>
+
+        <div class="table-container">
+          <table class="data-table" id="results-table">
+            <thead>
+              <tr>
+                <th>DATE</th>
+                <th>NARRATION</th>
+                <th>REF</th>
+                <th>CREDIT</th>
+              </tr>
+            </thead>
+            <tbody id="results-body">
+              <tr class="empty-row">
+                <td colspan="4">İzleme başlatılmadı veya veri henüz okunmadı.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        
+        <div class="data-stats" id="data-stats">
+          <span id="last-updated-text" class="last-updated">Son Güncelleme: Henüz yapılmadı</span>
+          <span>Toplam Satır: <strong id="row-count">0</strong></span>
+        </div>
+      </section>
+
+      <!-- Ayarlar Tab Content -->
+      <section id="tab-settings" class="tab-content">
+        <form id="settings-form">
+          <div class="form-group">
+            <label for="target-url">Hedef URL Kapsamı</label>
+            <input type="text" id="target-url" placeholder="Örn: banka.com/hesap" required>
+            <small class="help-text">Bu URL'yi içeren tüm alt rotalarda eklenti çalışır.</small>
+          </div>
+
+          <div class="form-group">
+            <label for="interval-seconds">İzleme Süresi (Saniye)</label>
+            <input type="number" id="interval-seconds" min="3" max="3600" placeholder="10" value="10" required>
+            <small class="help-text">Verilerin kaç saniyede bir otomatik taranacağını belirleyin.</small>
+          </div>
+
+          <div class="divider">Aranacak Tablo Başlık Metinleri</div>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="header-date">DATE Başlığı</label>
+              <input type="text" id="header-date" placeholder="Transaction Date" required>
+            </div>
+            <div class="form-group">
+              <label for="header-narration">NARRATION Başlığı</label>
+              <input type="text" id="header-narration" placeholder="Narration" required>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="form-group">
+              <label for="header-ref">REF Başlığı</label>
+              <input type="text" id="header-ref" placeholder="Transaction Reference" required>
+            </div>
+            <div class="form-group">
+              <label for="header-credit">CREDIT Başlığı</label>
+              <input type="text" id="header-credit" placeholder="Credit" required>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary">
+              Ayarları Kaydet
+            </button>
+          </div>
+        </form>
+        <div id="settings-status" class="toast hidden"></div>
+      </section>
+    </main>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
