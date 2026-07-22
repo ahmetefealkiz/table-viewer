@@ -3,8 +3,8 @@
 let trackingTimer = null;
 let trackingState = {
   isRunning: false,
-  intervalSeconds: 10,
-  secondsLeft: 10,
+  intervalSeconds: 300,
+  secondsLeft: 300,
   lastData: [],
   lastUpdatedTime: null,
   error: null
@@ -106,7 +106,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 function getSettings(callback) {
   const DEFAULT_SETTINGS = {
     targetUrl: '',
-    intervalSeconds: 10,
+    intervalSeconds: 300,
     headerDate: 'Transaction Date',
     headerNarration: 'Narration',
     headerRef: 'Transaction Reference',
@@ -224,6 +224,21 @@ function runDataScan(settings) {
   trackingState.lastData = dataList;
   trackingState.lastUpdatedTime = new Date().toLocaleTimeString();
   trackingState.error = null;
+
+  // Trigger Google Sheet Sync if data found
+  if (dataList.length > 0) {
+    chrome.runtime.sendMessage({ action: 'SYNC_TO_SHEET', dataList }, (response) => {
+      if (chrome.runtime.lastError) return;
+
+      if (response && !response.success && response.error) {
+        trackingState.error = response.error;
+        saveState();
+      } else if (response && response.success && response.addedCount > 0) {
+        trackingState.lastSyncMessage = response.message;
+        saveState();
+      }
+    });
+  }
 }
 
 function saveState() {

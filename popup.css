@@ -472,3 +472,148 @@ input[type="text"]:focus, input[type="number"]:focus {
   font-size: 10px;
   opacity: 0.8;
 }
+
+/* Card & Auth Section Styles */
+.card {
+  background-color: var(--bg-subtle);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  margin-bottom: 14px;
+}
+
+.card-header h3 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-main);
+  margin-bottom: 10px;
+}
+
+.section-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.btn-google {
+  background-color: #ffffff;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  font-weight: 500;
+}
+
+.btn-google:hover {
+  background-color: #f9fafb;
+  border-color: #9ca3af;
+}
+
+.user-info-box {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  background-color: var(--bg-element);
+  border-radius: var(--radius-sm);
+}
+
+.user-email-label {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.btn-outline-danger {
+  background-color: transparent;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}
+
+.btn-outline-danger:hover {
+  background-color: var(--error-bg);
+}
+
+.btn-sm {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+/* Select Wrapper with Refresh Button */
+.select-wrapper {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.select-wrapper select {
+  flex: 1;
+  background-color: var(--bg-app);
+  color: var(--text-main);
+  border: 1px solid var(--border-element);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  font-size: 12px;
+  outline: none;
+}
+
+.select-wrapper select:focus {
+  border-color: var(--border-focus);
+}
+
+.btn-icon-only {
+  background-color: var(--bg-element);
+  border: 1px solid var(--border-element);
+  color: var(--text-main);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s;
+}
+
+.btn-icon-only:hover {
+  background-color: var(--bg-element-hover);
+}
+
+/* Connected Sheet Info Box */
+.connected-info-box {
+  margin-top: 14px;
+  padding: 12px;
+  background-color: var(--success-bg);
+  border: 1px solid var(--success-border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.connected-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--success-text);
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.sheet-details {
+  font-size: 11px;
+  color: var(--text-main);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.connected-date {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+

@@ -3,11 +3,24 @@
   "name": "Banka İşlem Test Botu",
   "version": "1.0.0",
   "description": "Banka ödeme geçmişi verilerini özel seçicilerle okuma ve test etme eklentisi",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAy/xN4vTA/YhLelqpGZjcocLJ4me68R/VzMU65PZ7r9YOFWKNLzStVHqwmEt15onpqInBJkfRjCiSNIzyntcTAvWBKGdP3j8vl6KM86vKt5joqXPIYsri/V6sgai/pTKqD1A/DiE3wvv2Q1nPkIxm1DxjzzD1CO4Yj/wNoaH8BRRC4EYQxKymMalTZ40t+jNgAQtJ/n8gSsTd0wqZ1IEWV64P6PdXRv9vxTCHPR+taH7os3SRYFmhdzJhwNfA2LRkQpREhOp4jvcBA9vokrz715WCc/vGZQoLHPfXxJN4WDaieAzI9vBxTUdQNUUtFJRpao3wRVLTKv9uVnMV/pJ/JQIDAQAB",
   "permissions": [
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "identity"
   ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "oauth2": {
+    "client_id": "240954843860-kns2986tkseu8q4e0d1vshnrsn0f2850.apps.googleusercontent.com",
+    "scopes": [
+      "https://www.googleapis.com/auth/userinfo.email",
+      "https://www.googleapis.com/auth/drive.readonly",
+      "https://www.googleapis.com/auth/spreadsheets"
+    ]
+  },
   "host_permissions": [
     "<all_urls>"
   ],
