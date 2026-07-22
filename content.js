@@ -1,10 +1,14 @@
-// Persistent Content Script & Background Tracking Engine
+function getRandomInterval(baseMinutes = 4) {
+  const baseSec = (parseInt(baseMinutes, 10) || 4) * 60;
+  // baseSec + random 0 to 120 seconds (0 to 2 minutes)
+  return baseSec + Math.floor(Math.random() * 121);
+}
 
 let trackingTimer = null;
 let trackingState = {
   isRunning: false,
-  intervalSeconds: 300,
-  secondsLeft: 300,
+  intervalSeconds: getRandomInterval(4),
+  secondsLeft: 240,
   lastData: [],
   lastUpdatedTime: null,
   error: null
@@ -57,7 +61,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case 'START_TRACKING':
       getSettings((settings) => {
-        const interval = parseInt(settings.intervalSeconds, 10) || 10;
+        const interval = getRandomInterval(settings.baseMinutes);
         trackingState.intervalSeconds = interval;
         trackingState.secondsLeft = interval;
         trackingState.isRunning = true;
@@ -85,17 +89,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case 'FORCE_READ':
       getSettings((settings) => {
-        const interval = parseInt(settings.intervalSeconds, 10) || trackingState.intervalSeconds || 10;
-        trackingState.intervalSeconds = interval;
-        trackingState.secondsLeft = interval;
         trackingState.error = null;
 
-        runDataScan(settings);
-        saveState();
+        // Reset countdown timer
+        trackingState.secondsLeft = getRandomInterval(settings.baseMinutes);
 
-        sendResponse({ success: true, state: trackingState });
+        // Trigger refresh icon click if available
+        const refreshBtn = document.querySelector('.x-tool-refresh');
+        if (refreshBtn) {
+          try { refreshBtn.click(); } catch (e) {}
+        }
+
+        // Run immediate scan and wait for completion before responding to popup
+        runDataScan(settings, () => {
+          sendResponse({ success: true, state: trackingState });
+        });
       });
-      return true; // async response
+      return true; // Keep async channel open
 
     default:
       sendResponse({ success: false, error: 'Bilinmeyen işlem' });
@@ -106,7 +116,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 function getSettings(callback) {
   const DEFAULT_SETTINGS = {
     targetUrl: '',
-    intervalSeconds: 300,
+    baseMinutes: 4,
+    waitSeconds: 15,
+    fallbackCurrency: '',
     headerDate: 'Transaction Date',
     headerNarration: 'Narration',
     headerRef: 'Transaction Reference',
@@ -139,9 +151,26 @@ function startTrackingEngine() {
     if (trackingState.secondsLeft <= 0) {
       getSettings((settings) => {
         if (!trackingState.isRunning) return;
-        runDataScan(settings);
-        trackingState.secondsLeft = trackingState.intervalSeconds;
-        saveState();
+
+        // 1. Click refresh icon .x-tool-refresh
+        const refreshBtn = document.querySelector('.x-tool-refresh');
+        if (refreshBtn) {
+          try { refreshBtn.click(); } catch (e) {}
+        }
+
+        // 2. Wait specified seconds (default 15s) for data to reload
+        const waitSec = parseInt(settings.waitSeconds, 10) || 15;
+
+        setTimeout(() => {
+          if (!trackingState.isRunning) return;
+          runDataScan(settings);
+
+          // 3. Reset timer to baseMinutes + random 0-2 minutes interval
+          const newInterval = getRandomInterval(settings.baseMinutes);
+          trackingState.intervalSeconds = newInterval;
+          trackingState.secondsLeft = newInterval;
+          saveState();
+        }, waitSec * 1000);
       });
     } else {
       saveState();
@@ -157,13 +186,21 @@ function stopTrackingEngine() {
   trackingState.isRunning = false;
 }
 
-function runDataScan(settings) {
+function runDataScan(settings, onComplete) {
+  const finish = () => {
+    saveState();
+    if (typeof onComplete === 'function') {
+      onComplete();
+    }
+  };
+
   const currentUrl = window.location.href.toLowerCase();
   const targetUrl = (settings.targetUrl || '').trim().toLowerCase();
 
   // URL Containment Check
   if (targetUrl && !currentUrl.includes(targetUrl)) {
     trackingState.error = `Mevcut URL ("${window.location.href}"), hedef URL'yi ("${settings.targetUrl}") kapsamıyor.`;
+    finish();
     return;
   }
 
@@ -178,6 +215,7 @@ function runDataScan(settings) {
 
   if (!headerMap.date && !headerMap.narration && !headerMap.ref && !headerMap.credit) {
     trackingState.error = `Tablo içerisinde belirtilen başlıkların hiçbiri bulunamadı.`;
+    finish();
     return;
   }
 
@@ -201,7 +239,22 @@ function runDataScan(settings) {
 
   if (!rowElements || rowElements.length === 0) {
     trackingState.error = 'Tablo başlıkları bulundu fakat tablo veri satırları (rows) bulunamadı.';
+    finish();
     return;
+  }
+
+  // Extract Currency from Account Information modal (OD_CCY_CODE)
+  let currencyVal = '';
+  try {
+    const ccyEl = document.querySelector('textarea[name="OD_CCY_CODE"], input[name="OD_CCY_CODE"], [name="OD_CCY_CODE"]');
+    if (ccyEl) {
+      currencyVal = (ccyEl.value || ccyEl.innerText || ccyEl.textContent || '').trim();
+    }
+  } catch (e) {}
+
+  // Fallback to manual currency setting if not found on page
+  if (!currencyVal && settings.fallbackCurrency) {
+    currencyVal = settings.fallbackCurrency.trim();
   }
 
   const dataList = [];
@@ -213,6 +266,7 @@ function runDataScan(settings) {
 
     if (dateText || narrationText || refText || creditText) {
       dataList.push({
+        currency: currencyVal,
         date: dateText,
         narration: narrationText,
         ref: refText,
@@ -228,16 +282,17 @@ function runDataScan(settings) {
   // Trigger Google Sheet Sync if data found
   if (dataList.length > 0) {
     chrome.runtime.sendMessage({ action: 'SYNC_TO_SHEET', dataList }, (response) => {
-      if (chrome.runtime.lastError) return;
-
-      if (response && !response.success && response.error) {
-        trackingState.error = response.error;
-        saveState();
-      } else if (response && response.success && response.addedCount > 0) {
-        trackingState.lastSyncMessage = response.message;
-        saveState();
+      if (!chrome.runtime.lastError && response) {
+        if (!response.success && response.error) {
+          trackingState.error = response.error;
+        } else if (response.success && response.addedCount > 0) {
+          trackingState.lastSyncMessage = response.message;
+        }
       }
+      finish();
     });
+  } else {
+    finish();
   }
 }
 

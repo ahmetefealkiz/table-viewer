@@ -414,6 +414,7 @@ input[type="text"]:focus, input[type="number"]:focus {
 /* Radix Data Table */
 .table-container {
   max-height: 220px;
+  overflow-x: auto;
   overflow-y: auto;
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
@@ -421,7 +422,8 @@ input[type="text"]:focus, input[type="number"]:focus {
 }
 
 .data-table {
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   border-collapse: collapse;
   font-size: 12px;
 }
@@ -430,7 +432,7 @@ input[type="text"]:focus, input[type="number"]:focus {
   padding: 8px 10px;
   text-align: left;
   border-bottom: 1px solid var(--border-subtle);
-  word-break: break-word;
+  white-space: nowrap;
 }
 
 .data-table th {

@@ -19,7 +19,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const settingsForm = document.getElementById('settings-form');
   const settingsStatus = document.getElementById('settings-status');
   const inputTargetUrl = document.getElementById('target-url');
-  const inputIntervalSeconds = document.getElementById('interval-seconds');
+  const inputBaseMinutes = document.getElementById('base-interval-minutes');
+  const inputWaitSeconds = document.getElementById('wait-seconds');
+  const inputFallbackCurrency = document.getElementById('fallback-currency');
   const inputHeaderDate = document.getElementById('header-date');
   const inputHeaderNarration = document.getElementById('header-narration');
   const inputHeaderRef = document.getElementById('header-ref');
@@ -27,7 +29,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const DEFAULT_SETTINGS = {
     targetUrl: '',
-    intervalSeconds: 300,
+    baseMinutes: 4,
+    waitSeconds: 15,
+    fallbackCurrency: '',
     headerDate: 'Transaction Date',
     headerNarration: 'Narration',
     headerRef: 'Transaction Reference',
@@ -51,7 +55,9 @@ document.addEventListener('DOMContentLoaded', () => {
     chrome.storage.local.get(['bankBotSettings'], (result) => {
       const settings = result.bankBotSettings || DEFAULT_SETTINGS;
       inputTargetUrl.value = settings.targetUrl || '';
-      inputIntervalSeconds.value = settings.intervalSeconds || 300;
+      inputBaseMinutes.value = settings.baseMinutes || 4;
+      inputWaitSeconds.value = settings.waitSeconds || settings.intervalSeconds || 15;
+      inputFallbackCurrency.value = settings.fallbackCurrency || '';
       inputHeaderDate.value = settings.headerDate || DEFAULT_SETTINGS.headerDate;
       inputHeaderNarration.value = settings.headerNarration || DEFAULT_SETTINGS.headerNarration;
       inputHeaderRef.value = settings.headerRef || DEFAULT_SETTINGS.headerRef;
@@ -67,7 +73,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const newSettings = {
       targetUrl: inputTargetUrl.value.trim(),
-      intervalSeconds: parseInt(inputIntervalSeconds.value, 10) || 10,
+      baseMinutes: parseInt(inputBaseMinutes.value, 10) || 4,
+      waitSeconds: parseInt(inputWaitSeconds.value, 10) || 15,
+      fallbackCurrency: inputFallbackCurrency.value.trim(),
       headerDate: inputHeaderDate.value.trim(),
       headerNarration: inputHeaderNarration.value.trim(),
       headerRef: inputHeaderRef.value.trim(),
@@ -241,7 +249,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // --- Helper Render Functions ---
   function renderTableData(data) {
     if (!data || data.length === 0) {
-      resultsBody.innerHTML = `<tr class="empty-row"><td colspan="4">Okunan işlem verisi bulunamadı.</td></tr>`;
+      resultsBody.innerHTML = `<tr class="empty-row"><td colspan="5">Okunan işlem verisi bulunamadı.</td></tr>`;
       rowCountEl.textContent = '0';
       return;
     }
@@ -252,6 +260,9 @@ document.addEventListener('DOMContentLoaded', () => {
     data.forEach(item => {
       const tr = document.createElement('tr');
       
+      const tdCurrency = document.createElement('td');
+      tdCurrency.textContent = item.currency || '-';
+
       const tdDate = document.createElement('td');
       tdDate.textContent = item.date || '-';
       
@@ -264,6 +275,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const tdCredit = document.createElement('td');
       tdCredit.textContent = item.credit || '-';
 
+      tr.appendChild(tdCurrency);
       tr.appendChild(tdDate);
       tr.appendChild(tdNarration);
       tr.appendChild(tdRef);

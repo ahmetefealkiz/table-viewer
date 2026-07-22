@@ -170,7 +170,7 @@ function validateAndConnectSheet(spreadsheetId, spreadsheetName, sendResponse) {
         }
 
         const headers = rows[0].map(h => (h || '').toString().trim().toLowerCase());
-        const REQUIRED_HEADERS = ['date', 'narration', 'reference', 'credit'];
+        const REQUIRED_HEADERS = ['currency', 'date', 'narration', 'reference', 'credit'];
         const missingHeaders = [];
 
         REQUIRED_HEADERS.forEach(req => {
@@ -183,7 +183,7 @@ function validateAndConnectSheet(spreadsheetId, spreadsheetName, sendResponse) {
         if (missingHeaders.length > 0) {
           sendResponse({
             success: false,
-            error: `Seçilen E-Tabloda zorunlu kolon(lar) bulunamadı: ${missingHeaders.join(', ')}.\nLütfen tablonun ilk satırına Date, Narration, Reference ve Credit başlıklarını ekleyin.`
+            error: `Seçilen E-Tabloda zorunlu kolon(lar) bulunamadı: ${missingHeaders.join(', ')}.\nLütfen tablonun ilk satırına Currency, Date, Narration, Reference ve Credit başlıklarını ekleyin.`
           });
           return;
         }
@@ -284,19 +284,20 @@ function syncDataToSheet(dataList, sendResponse) {
           const values = responseData.values || [];
 
           if (values.length === 0) {
-            throw new Error('E-Tablo tamamen boş. Lütfen ilk satıra kolon başlıklarını (Date, Narration, Reference, Credit) ekleyin.');
+            throw new Error('E-Tablo tamamen boş. Lütfen ilk satıra kolon başlıklarını (Currency, Date, Narration, Reference, Credit) ekleyin.');
           }
 
           // Header row is index 0
           const headerRow = values[0].map(h => (h || '').toString().trim().toLowerCase());
 
+          const currencyIdx = headerRow.indexOf('currency');
           const dateIdx = headerRow.indexOf('date');
           const narrationIdx = headerRow.indexOf('narration');
           const refIdx = headerRow.indexOf('reference');
           const creditIdx = headerRow.indexOf('credit');
 
-          if (dateIdx === -1 || narrationIdx === -1 || refIdx === -1 || creditIdx === -1) {
-            throw new Error('Seçilen E-Tabloda zorunlu kolon başlıklarından (Date, Narration, Reference, Credit) biri eksik.');
+          if (currencyIdx === -1 || dateIdx === -1 || narrationIdx === -1 || refIdx === -1 || creditIdx === -1) {
+            throw new Error('Seçilen E-Tabloda zorunlu kolon başlıklarından (Currency, Date, Narration, Reference, Credit) biri eksik.');
           }
 
           let itemsToWrite = [];
@@ -304,21 +305,30 @@ function syncDataToSheet(dataList, sendResponse) {
           // Find data rows (excluding header)
           const dataRows = values.slice(1).filter(row => row.some(cell => cell && cell.toString().trim() !== ''));
 
-          if (dataRows.length === 0) {
-            // Sheet has no data rows yet! Write ALL items in chronological order (oldest first)
+          // Get the current currency being synced from dataList
+          const currentCurrency = (dataList[0]?.currency || '').toString().trim().toLowerCase();
+          const normStr = (val) => (val || '').toString().replace(/[\s\u00a0]+/g, ' ').trim().toLowerCase();
+
+          // 1. Filter rows in E-Tablo that match the selected currency
+          const sameCurrencyRows = dataRows.filter(row => normStr(row[currencyIdx]) === currentCurrency);
+
+          if (sameCurrencyRows.length === 0) {
+            // 1.2. No rows with the selected currency exist in E-Tablo yet! Append ALL items without matching
             itemsToWrite = [...dataList].reverse();
           } else {
-            // Find the last recorded transaction from the sheet
-            const lastRecordedRow = dataRows[dataRows.length - 1];
+            // 1.1. Rows with the selected currency exist in E-Tablo!
+            // Get the LAST recorded transaction for this specific currency
+            const lastRecordedRow = sameCurrencyRows[sameCurrencyRows.length - 1];
             
             const lastRecordedObj = {
+              currency: lastRecordedRow[currencyIdx],
               date: lastRecordedRow[dateIdx],
               narration: lastRecordedRow[narrationIdx],
               ref: lastRecordedRow[refIdx],
               credit: lastRecordedRow[creditIdx]
             };
 
-            // Search for lastRecordedObj starting from index 0 (VERY TOP of web page table)
+            // Search for lastRecordedObj starting from index 0 in scraped dataList
             let matchIndex = -1;
             for (let i = 0; i < dataList.length; i++) {
               if (isRowMatch(dataList[i], lastRecordedObj)) {
@@ -328,10 +338,11 @@ function syncDataToSheet(dataList, sendResponse) {
             }
 
             if (matchIndex === -1) {
-              // Last saved transaction in sheet was NOT found starting from top of webpage table
+              // 1.1.1. Last saved transaction for this currency was NOT found in read data
+              const currencyName = (dataList[0]?.currency || '').toUpperCase();
               sendResponse({
                 success: false,
-                error: "E-Tablodaki son kaydedilmiş işlem web sayfasında bulunamadı. Lütfen web sayfasındaki listeleme filtresini 'son 7 gün'den 'son 1 ay'a (veya daha geniş bir aralığa) güncelleyip tekrar okutun."
+                error: `E-Tablodaki ${currencyName ? currencyName + ' para birimine ait ' : ''}son kaydedilmiş işlem web sayfasında bulunamadı. Lütfen web sayfasındaki listeleme filtresini 'son 7 gün'den 'son 1 ay'a (veya daha geniş bir aralığa) güncelleyip tekrar okutun.`
               });
               return;
             }
@@ -349,6 +360,7 @@ function syncDataToSheet(dataList, sendResponse) {
           // Format itemsToWrite into 2D row arrays matching the Sheet column order
           const formattedRows = itemsToWrite.map(item => {
             const row = new Array(headerRow.length).fill('');
+            row[currencyIdx] = item.currency || '';
             row[dateIdx] = item.date || '';
             row[narrationIdx] = item.narration || '';
             row[refIdx] = item.ref || '';
@@ -387,7 +399,7 @@ function syncDataToSheet(dataList, sendResponse) {
 }
 
 /**
- * Row Matcher: Requires ALL 4 columns (Date, Narration, Reference, Credit) to match strictly
+ * Row Matcher: Requires ALL 5 columns (Currency, Date, Narration, Reference, Credit) to match strictly
  */
 function isRowMatch(item, lastRecordedObj) {
   if (!item || !lastRecordedObj) return false;
@@ -407,11 +419,13 @@ function isRowMatch(item, lastRecordedObj) {
     return isNaN(parsed) ? norm(val) : parsed.toFixed(2);
   };
 
+  const currencyMatch = norm(item.currency) === norm(lastRecordedObj.currency);
   const dateMatch = norm(item.date) === norm(lastRecordedObj.date);
   const narrationMatch = norm(item.narration) === norm(lastRecordedObj.narration);
   const refMatch = norm(item.ref) === norm(lastRecordedObj.ref);
   const creditMatch = (norm(item.credit) === norm(lastRecordedObj.credit)) || (normCredit(item.credit) === normCredit(lastRecordedObj.credit));
 
-  // ALL 4 COLUMNS MUST MATCH
-  return dateMatch && narrationMatch && refMatch && creditMatch;
+  const ccyOk = (!item.currency || !lastRecordedObj.currency) ? true : currencyMatch;
+
+  return ccyOk && dateMatch && narrationMatch && refMatch && creditMatch;
 }
