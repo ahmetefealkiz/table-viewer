@@ -125,8 +125,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Header Badge & Start/Stop Button
     if (state.isRunning) {
-      globalBadge.textContent = 'İzleniyor...';
-      globalBadge.className = 'badge badge-running';
+      if (state.isWaitingForData) {
+        globalBadge.textContent = 'Yenileniyor...';
+        globalBadge.className = 'badge badge-running';
+      } else {
+        globalBadge.textContent = 'İzleniyor...';
+        globalBadge.className = 'badge badge-running';
+      }
 
       btnToggleTracking.className = 'btn btn-stop btn-full';
       btnToggleText.textContent = 'İzlemeyi Durdur';

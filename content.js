@@ -9,6 +9,8 @@ let trackingState = {
   isRunning: false,
   intervalSeconds: getRandomInterval(4),
   secondsLeft: 240,
+  currentPhase: 'IDLE', // 'IDLE', 'REFRESH_LIST', 'OPEN_ACCOUNT', 'CONFIGURE_ACCOUNT', 'READ_DATA', 'CLOSE_ACCOUNT'
+  currentAccountIndex: 0, // 0, 1, 2
   lastData: [],
   lastUpdatedTime: null,
   error: null
@@ -18,7 +20,6 @@ let trackingState = {
 chrome.storage.local.get(['bankBotTrackingState'], (result) => {
   if (result.bankBotTrackingState) {
     trackingState = { ...trackingState, ...result.bankBotTrackingState };
-    // If it was running and this tab is the designated tracking instance, resume tracking
     if (trackingState.isRunning && sessionStorage.getItem('isBankBotTracking') === 'true') {
       startTrackingEngine();
     } else if (!trackingState.isRunning) {
@@ -63,26 +64,25 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       getSettings((settings) => {
         const interval = getRandomInterval(settings.baseMinutes);
         trackingState.intervalSeconds = interval;
-        trackingState.secondsLeft = interval;
+        trackingState.secondsLeft = 0; // Trigger process immediately
+        trackingState.currentPhase = 'IDLE';
+        trackingState.currentAccountIndex = 0;
         trackingState.isRunning = true;
         trackingState.error = null;
 
-        // Mark this tab as the active tracking instance
         sessionStorage.setItem('isBankBotTracking', 'true');
-        
-        // Perform initial immediate scan
-        runDataScan(settings);
         startTrackingEngine();
         saveState();
 
         sendResponse({ success: true, state: trackingState });
       });
-      return true; // async response
+      return true;
 
     case 'STOP_TRACKING':
-      // Clear tracking mark
       sessionStorage.removeItem('isBankBotTracking');
       stopTrackingEngine();
+      trackingState.currentPhase = 'IDLE';
+      trackingState.currentAccountIndex = 0;
       saveState();
       sendResponse({ success: true, state: trackingState });
       break;
@@ -90,19 +90,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'FORCE_READ':
       getSettings((settings) => {
         trackingState.error = null;
-
-        // Reset countdown timer
-        trackingState.secondsLeft = getRandomInterval(settings.baseMinutes);
-
-        // Trigger refresh icon click (2nd .x-tool-refresh button)
-        clickRefreshButton();
-
-        // Run immediate scan and wait for completion before responding to popup
-        runDataScan(settings, () => {
-          sendResponse({ success: true, state: trackingState });
-        });
+        trackingState.currentAccountIndex = 0;
+        trackingState.currentPhase = 'REFRESH_LIST';
+        trackingState.secondsLeft = 0;
+        saveState();
+        sendResponse({ success: true, state: trackingState });
       });
-      return true; // Keep async channel open
+      return true;
 
     default:
       sendResponse({ success: false, error: 'Bilinmeyen işlem' });
@@ -110,13 +104,187 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true;
 });
 
-function clickRefreshButton() {
+const TARGET_ACCOUNTS = ['0514575556901', '0514575556902', '0514575556903'];
+
+// Single click on element at a random coordinate inside element bounds
+function clickElementRandom(element) {
+  if (!element) return;
+  try {
+    // 1. Invoke native click to ensure standard browser event listeners and actions trigger
+    element.click();
+
+    // 2. Dispatch MouseEvent with random coordinates inside element
+    const rect = element.getBoundingClientRect();
+    if (rect.width > 0 && rect.height > 0) {
+      const offsetX = Math.floor(Math.random() * Math.max(rect.width * 0.6, 5)) + 2;
+      const offsetY = Math.floor(Math.random() * Math.max(rect.height * 0.6, 5)) + 2;
+      const clientX = rect.left + offsetX;
+      const clientY = rect.top + offsetY;
+
+      const clickEvent = new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true,
+        view: window,
+        detail: 1,
+        clientX: clientX,
+        clientY: clientY
+      });
+      element.dispatchEvent(clickEvent);
+    }
+  } catch (e) {
+    try { element.click(); } catch (err) {}
+  }
+}
+
+// Double click on element at a random coordinate inside element bounds
+function doubleClickElementRandom(element) {
+  if (!element) return;
+  try {
+    element.click();
+
+    const rect = element.getBoundingClientRect();
+    const offsetX = Math.floor(Math.random() * Math.max(rect.width * 0.6, 5)) + 2;
+    const offsetY = Math.floor(Math.random() * Math.max(rect.height * 0.6, 5)) + 2;
+    const clientX = rect.left + offsetX;
+    const clientY = rect.top + offsetY;
+
+    const dblClickEvent = new MouseEvent('dblclick', {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+      detail: 2,
+      clientX: clientX,
+      clientY: clientY
+    });
+    element.dispatchEvent(dblClickEvent);
+  } catch (e) {
+    try { element.click(); } catch (err) {}
+  }
+}
+
+// Find element by text content or input value (case insensitive, partial match)
+function findElementByText(text, container = document) {
+  if (!text) return null;
+  const searchText = text.toLowerCase().trim();
+  const allElements = container.querySelectorAll('*');
+  let bestMatch = null;
+  
+  for (const el of allElements) {
+    // Check input value, innerText, textContent or value attribute
+    const val = (el.value || el.innerText || el.textContent || el.getAttribute('value') || '').toLowerCase().trim();
+    if (val.includes(searchText)) {
+      bestMatch = el;
+      // Prefer inputs, buttons, list items, or leaf elements
+      if (el.tagName === 'INPUT' || el.tagName === 'BUTTON' || el.classList.contains('x-combo-list-item') || el.classList.contains('filter-btn') || el.children.length === 0) {
+        break;
+      }
+    }
+  }
+  return bestMatch;
+}
+
+// 1. Account summary list refresh (Class name based - first refresh button)
+function clickListRefresh() {
   try {
     const refreshBtns = document.querySelectorAll('.x-tool-refresh');
     if (refreshBtns && refreshBtns.length > 0) {
-      // Target the 2nd button (index 1) if present, otherwise fallback to index 0
+      clickElementRandom(refreshBtns[0]);
+    }
+  } catch (e) {}
+}
+
+// Double click account by text number
+function openAccountByNumber(accountNumber) {
+  try {
+    const targetEl = findElementByText(accountNumber);
+    if (targetEl) {
+      doubleClickElementRandom(targetEl);
+    } else {
+      const allRows = Array.from(document.querySelectorAll('.x-grid3-row')).filter(r => !r.closest('.x-window'));
+      if (allRows.length > trackingState.currentAccountIndex) {
+        const row = allRows[trackingState.currentAccountIndex];
+        const cell = row.querySelector('.x-grid3-cell-inner') || row;
+        doubleClickElementRandom(cell);
+      }
+    }
+  } catch (e) {}
+}
+
+// Click Current Day filter by text
+function clickCurrentDayFilter() {
+  try {
+    let el = findElementByText('current day') || findElementByText('bugün');
+    if (el) {
+      const trigger = el.parentElement ? el.parentElement.querySelector('.x-form-arrow-trigger') : null;
+      if (trigger) {
+        clickElementRandom(trigger);
+      }
+      clickElementRandom(el);
+    } else {
+      const combos = document.querySelectorAll('.x-window .x-form-arrow-trigger, .x-form-arrow-trigger, .x-form-combo, input.x-trigger-noedit');
+      if (combos.length > 0) {
+        clickElementRandom(combos[combos.length - 1]);
+      }
+    }
+  } catch (e) {}
+}
+
+// Click Last 7 Days dropdown option by text
+function clickLast7DaysOption() {
+  try {
+    let el = findElementByText('last 7') || findElementByText('7 day') || findElementByText('7 gün') || findElementByText('son 7');
+    if (el) {
+      clickElementRandom(el);
+    } else {
+      const items = document.querySelectorAll('.x-combo-list-item, div, li, td, span');
+      for (const item of items) {
+        const txt = (item.innerText || item.textContent || '').toLowerCase().trim();
+        if (txt.includes('last 7') || txt.includes('7 day') || txt.includes('7 gün') || txt.includes('son 7')) {
+          clickElementRandom(item);
+          break;
+        }
+      }
+    }
+  } catch (e) {}
+}
+
+// Click Go button by text
+function clickGoButton() {
+  try {
+    let el = findElementByText('go');
+    if (el) {
+      clickElementRandom(el);
+    } else {
+      const btns = document.querySelectorAll('button, input[type="button"], input[type="submit"], .x-btn, .go-btn');
+      for (const btn of btns) {
+        const txt = (btn.value || btn.innerText || btn.textContent || '').toLowerCase().trim();
+        if (txt === 'go' || txt.includes('go')) {
+          clickElementRandom(btn);
+          break;
+        }
+      }
+    }
+  } catch (e) {}
+}
+
+// Account page refresh (Class name based - second refresh button)
+function clickAccountRefresh() {
+  try {
+    const refreshBtns = document.querySelectorAll('.x-tool-refresh');
+    if (refreshBtns && refreshBtns.length > 0) {
       const targetBtn = refreshBtns.length >= 2 ? refreshBtns[1] : refreshBtns[0];
-      targetBtn.click();
+      clickElementRandom(targetBtn);
+    }
+  } catch (e) {}
+}
+
+// Close account modal (Class name based)
+function closeAccountModal() {
+  try {
+    const closeBtns = document.querySelectorAll('.x-tool-close');
+    if (closeBtns.length > 0) {
+      const targetBtn = closeBtns[closeBtns.length - 1];
+      clickElementRandom(targetBtn);
     }
   } catch (e) {}
 }
@@ -138,10 +306,95 @@ function getSettings(callback) {
   });
 }
 
+function processNextPhase(settings) {
+  switch (trackingState.currentPhase) {
+    case 'IDLE':
+      trackingState.currentAccountIndex = 0;
+      trackingState.currentPhase = 'REFRESH_LIST';
+      trackingState.secondsLeft = 0;
+      break;
+
+    case 'REFRESH_LIST':
+      // Step 1: Click first refresh button (Class based)
+      clickListRefresh();
+      trackingState.currentPhase = 'OPEN_ACCOUNT';
+      trackingState.secondsLeft = 1; // 1 second sleep
+      break;
+
+    case 'OPEN_ACCOUNT':
+      // Step 2: Double click account number by text
+      const accNumber = TARGET_ACCOUNTS[trackingState.currentAccountIndex] || TARGET_ACCOUNTS[0];
+      openAccountByNumber(accNumber);
+      trackingState.currentPhase = 'CLICK_FILTER';
+      trackingState.secondsLeft = 5; // Wait 5s for modal to open
+      break;
+
+    case 'CLICK_FILTER':
+      // Step 3: Click 'Current Day' text filter
+      clickCurrentDayFilter();
+      trackingState.currentPhase = 'CLICK_DROPDOWN';
+      trackingState.secondsLeft = 1; // 1 second sleep
+      break;
+
+    case 'CLICK_DROPDOWN':
+      // Step 4: Click 'Last 7 Days' option from dropdown by text
+      clickLast7DaysOption();
+      trackingState.currentPhase = 'CLICK_GO';
+      trackingState.secondsLeft = 1; // 1 second sleep
+      break;
+
+    case 'CLICK_GO':
+      // Step 5: Click 'Go' button by text
+      clickGoButton();
+      trackingState.currentPhase = 'REFRESH_ACCOUNT';
+      trackingState.secondsLeft = 1; // 1 second sleep
+      break;
+
+    case 'REFRESH_ACCOUNT':
+      // Step 6: Click second refresh button on account page (Class based)
+      clickAccountRefresh();
+      trackingState.currentPhase = 'READ_DATA';
+      const waitSec = parseInt(settings.waitSeconds, 10) || 15;
+      trackingState.secondsLeft = waitSec; // Wait for data load
+      break;
+
+    case 'READ_DATA':
+      // Step 7: Read data and sync to sheet
+      runDataScan(settings);
+      trackingState.currentPhase = 'CLOSE_ACCOUNT';
+      trackingState.secondsLeft = 1; // 1 second sleep
+      break;
+
+    case 'CLOSE_ACCOUNT':
+      // Step 8: Click close icon (Class based)
+      closeAccountModal();
+      trackingState.currentAccountIndex++;
+      
+      if (trackingState.currentAccountIndex < TARGET_ACCOUNTS.length) {
+        // Move to next account
+        trackingState.currentPhase = 'REFRESH_LIST';
+        trackingState.secondsLeft = 1; // 1 second sleep
+      } else {
+        // Finished all 3 accounts -> reset to IDLE and set random timer
+        trackingState.currentAccountIndex = 0;
+        trackingState.currentPhase = 'IDLE';
+        const newInterval = getRandomInterval(settings.baseMinutes);
+        trackingState.intervalSeconds = newInterval;
+        trackingState.secondsLeft = newInterval;
+      }
+      break;
+
+    default:
+      trackingState.currentPhase = 'IDLE';
+      trackingState.secondsLeft = getRandomInterval(settings.baseMinutes);
+      break;
+  }
+  saveState();
+}
+
 function startTrackingEngine() {
   stopTrackingEngine();
   
-  // Only start interval if this tab instance is marked for tracking
   if (sessionStorage.getItem('isBankBotTracking') !== 'true') {
     return;
   }
@@ -159,23 +412,7 @@ function startTrackingEngine() {
     if (trackingState.secondsLeft <= 0) {
       getSettings((settings) => {
         if (!trackingState.isRunning) return;
-
-        // 1. Click 2nd refresh icon .x-tool-refresh
-        clickRefreshButton();
-
-        // 2. Wait specified seconds (default 15s) for data to reload
-        const waitSec = parseInt(settings.waitSeconds, 10) || 15;
-
-        setTimeout(() => {
-          if (!trackingState.isRunning) return;
-          runDataScan(settings);
-
-          // 3. Reset timer to baseMinutes + random 0-2 minutes interval
-          const newInterval = getRandomInterval(settings.baseMinutes);
-          trackingState.intervalSeconds = newInterval;
-          trackingState.secondsLeft = newInterval;
-          saveState();
-        }, waitSec * 1000);
+        processNextPhase(settings);
       });
     } else {
       saveState();
@@ -322,7 +559,6 @@ function findColumnHeaderMap(targetHeaders) {
     const candidateElements = document.querySelectorAll('th, td.x-grid3-hd, div.x-grid3-hd-inner, td, div');
 
     candidateElements.forEach((el) => {
-      // Must be nested inside a <table> element
       const closestTable = el.closest('table');
       if (!closestTable) return;
 
