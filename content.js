@@ -94,11 +94,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         // Reset countdown timer
         trackingState.secondsLeft = getRandomInterval(settings.baseMinutes);
 
-        // Trigger refresh icon click if available
-        const refreshBtn = document.querySelector('.x-tool-refresh');
-        if (refreshBtn) {
-          try { refreshBtn.click(); } catch (e) {}
-        }
+        // Trigger refresh icon click (2nd .x-tool-refresh button)
+        clickRefreshButton();
 
         // Run immediate scan and wait for completion before responding to popup
         runDataScan(settings, () => {
@@ -112,6 +109,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
   return true;
 });
+
+function clickRefreshButton() {
+  try {
+    const refreshBtns = document.querySelectorAll('.x-tool-refresh');
+    if (refreshBtns && refreshBtns.length > 0) {
+      // Target the 2nd button (index 1) if present, otherwise fallback to index 0
+      const targetBtn = refreshBtns.length >= 2 ? refreshBtns[1] : refreshBtns[0];
+      targetBtn.click();
+    }
+  } catch (e) {}
+}
 
 function getSettings(callback) {
   const DEFAULT_SETTINGS = {
@@ -152,11 +160,8 @@ function startTrackingEngine() {
       getSettings((settings) => {
         if (!trackingState.isRunning) return;
 
-        // 1. Click refresh icon .x-tool-refresh
-        const refreshBtn = document.querySelector('.x-tool-refresh');
-        if (refreshBtn) {
-          try { refreshBtn.click(); } catch (e) {}
-        }
+        // 1. Click 2nd refresh icon .x-tool-refresh
+        clickRefreshButton();
 
         // 2. Wait specified seconds (default 15s) for data to reload
         const waitSec = parseInt(settings.waitSeconds, 10) || 15;
