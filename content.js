@@ -14,11 +14,28 @@ let trackingState = {
 chrome.storage.local.get(['bankBotTrackingState'], (result) => {
   if (result.bankBotTrackingState) {
     trackingState = { ...trackingState, ...result.bankBotTrackingState };
-    // If it was running when tab reloaded/started, resume tracking
-    if (trackingState.isRunning) {
+    // If it was running and this tab is the designated tracking instance, resume tracking
+    if (trackingState.isRunning && sessionStorage.getItem('isBankBotTracking') === 'true') {
       startTrackingEngine();
-    } else {
+    } else if (!trackingState.isRunning) {
       stopTrackingEngine();
+    }
+  }
+});
+
+// Synchronize state changes across tabs
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes.bankBotTrackingState) {
+    const newState = changes.bankBotTrackingState.newValue;
+    if (newState) {
+      trackingState = { ...trackingState, ...newState };
+      if (trackingState.isRunning) {
+        if (sessionStorage.getItem('isBankBotTracking') === 'true') {
+          startTrackingEngine();
+        }
+      } else {
+        stopTrackingEngine();
+      }
     }
   }
 });
@@ -30,6 +47,14 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ success: true, state: trackingState });
       break;
 
+    case 'CLEAR_DATA':
+      trackingState.lastData = [];
+      trackingState.lastUpdatedTime = null;
+      trackingState.error = null;
+      saveState();
+      sendResponse({ success: true, state: trackingState });
+      break;
+
     case 'START_TRACKING':
       getSettings((settings) => {
         const interval = parseInt(settings.intervalSeconds, 10) || 10;
@@ -38,6 +63,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         trackingState.isRunning = true;
         trackingState.error = null;
 
+        // Mark this tab as the active tracking instance
+        sessionStorage.setItem('isBankBotTracking', 'true');
+        
         // Perform initial immediate scan
         runDataScan(settings);
         startTrackingEngine();
@@ -48,6 +76,8 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true; // async response
 
     case 'STOP_TRACKING':
+      // Clear tracking mark
+      sessionStorage.removeItem('isBankBotTracking');
       stopTrackingEngine();
       saveState();
       sendResponse({ success: true, state: trackingState });
@@ -89,8 +119,12 @@ function getSettings(callback) {
 }
 
 function startTrackingEngine() {
-  // Always stop existing timer first to prevent duplicate timer leaks
   stopTrackingEngine();
+  
+  // Only start interval if this tab instance is marked for tracking
+  if (sessionStorage.getItem('isBankBotTracking') !== 'true') {
+    return;
+  }
 
   trackingState.isRunning = true;
 
@@ -104,7 +138,7 @@ function startTrackingEngine() {
 
     if (trackingState.secondsLeft <= 0) {
       getSettings((settings) => {
-        if (!trackingState.isRunning) return; // Prevent execution if stopped during async call
+        if (!trackingState.isRunning) return;
         runDataScan(settings);
         trackingState.secondsLeft = trackingState.intervalSeconds;
         saveState();
@@ -143,18 +177,30 @@ function runDataScan(settings) {
   const headerMap = findColumnHeaderMap(targetHeaders);
 
   if (!headerMap.date && !headerMap.narration && !headerMap.ref && !headerMap.credit) {
-    trackingState.error = `Sayfada belirtilen başlıkların hiçbiri bulunamadı.`;
+    trackingState.error = `Tablo içerisinde belirtilen başlıkların hiçbiri bulunamadı.`;
     return;
   }
 
-  let rowElements = document.querySelectorAll('.x-grid3-row');
-  if (!rowElements || rowElements.length === 0) {
-    const tableEl = headerMap.tableContainer || document;
-    rowElements = tableEl.querySelectorAll('tbody tr, tr:not(:first-child)');
-  }
+  let rowElements = [];
+  try {
+    const tableContext = headerMap.tableContainer || document;
+    const rows = tableContext.querySelectorAll('.x-grid3-row');
+    if (rows && rows.length > 0) {
+      rows.forEach(r => {
+        if (r.closest('table') || r.querySelector('table')) {
+          rowElements.push(r);
+        }
+      });
+    } else {
+      const trs = tableContext.querySelectorAll('tbody tr, tr:not(:first-child)');
+      if (trs && trs.length > 0) {
+        rowElements.push(...Array.from(trs));
+      }
+    }
+  } catch (e) {}
 
   if (!rowElements || rowElements.length === 0) {
-    trackingState.error = 'Başlıklar bulundu ancak verileri içeren tablo satırları bulunamadı.';
+    trackingState.error = 'Tablo başlıkları bulundu fakat tablo veri satırları (rows) bulunamadı.';
     return;
   }
 
@@ -197,30 +243,36 @@ function findColumnHeaderMap(targetHeaders) {
     tableContainer: null
   };
 
-  const candidateElements = document.querySelectorAll('th, td.x-grid3-hd, div.x-grid3-hd-inner, td, div');
+  try {
+    const candidateElements = document.querySelectorAll('th, td.x-grid3-hd, div.x-grid3-hd-inner, td, div');
 
-  candidateElements.forEach((el) => {
-    const text = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
-    if (!text) return;
+    candidateElements.forEach((el) => {
+      // Must be nested inside a <table> element
+      const closestTable = el.closest('table');
+      if (!closestTable) return;
 
-    for (const key of ['date', 'narration', 'ref', 'credit']) {
-      if (!result[key] && isTextMatch(text, targetHeaders[key])) {
-        result[key] = analyzeHeaderElement(el);
-        if (!result.tableContainer) {
-          result.tableContainer = el.closest('table') || el.closest('.x-panel') || el.closest('.x-grid3');
+      const text = (el.innerText || el.textContent || '').replace(/\s+/g, ' ').trim();
+      if (!text) return;
+
+      for (const key of ['date', 'narration', 'ref', 'credit']) {
+        if (!result[key] && isTextMatch(text, targetHeaders[key])) {
+          result[key] = analyzeHeaderElement(el);
+          if (!result.tableContainer) {
+            result.tableContainer = el.closest('.x-grid3') || el.closest('.x-panel') || closestTable;
+          }
         }
       }
-    }
-  });
+    });
+  } catch (e) {}
 
   return result;
 }
 
 function isTextMatch(elementText, targetText) {
   if (!elementText || !targetText) return false;
-  const cleanElement = elementText.toLowerCase();
-  const cleanTarget = targetText.toLowerCase();
-  return cleanElement === cleanTarget || cleanElement.startsWith(cleanTarget);
+  const cleanElement = elementText.toLowerCase().trim();
+  const cleanTarget = targetText.toLowerCase().trim();
+  return cleanElement === cleanTarget;
 }
 
 function analyzeHeaderElement(headerEl) {

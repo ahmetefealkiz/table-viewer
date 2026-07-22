@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnToggleTracking = document.getElementById('btn-toggle-tracking');
   const btnToggleText = document.getElementById('btn-toggle-text');
   const btnForceRead = document.getElementById('btn-force-read');
+  const btnClearData = document.getElementById('btn-clear-data');
   const countdownTimer = document.getElementById('countdown-timer');
   const trackingStatus = document.getElementById('tracking-status');
   const resultsBody = document.getElementById('results-body');
@@ -78,36 +79,30 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // --- 3. Initial State Fetch & Sync ---
-  function syncStateWithActiveTab() {
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      const activeTab = tabs[0];
-      if (!activeTab) {
-        fallbackToStorageState();
-        return;
-      }
-
-      chrome.tabs.sendMessage(activeTab.id, { action: 'GET_STATE' }, (response) => {
-        if (chrome.runtime.lastError || !response || !response.success) {
-          // Content script not loaded or page not supported yet
-          fallbackToStorageState();
-          return;
-        }
-
-        updateUIFromState(response.state);
-      });
-    });
-  }
-
-  function fallbackToStorageState() {
+  // --- 3. Initial State Sync ---
+  function syncState() {
+    // Read directly from storage first to get the most up-to-date global state
     chrome.storage.local.get(['bankBotTrackingState'], (result) => {
       if (result.bankBotTrackingState) {
         updateUIFromState(result.bankBotTrackingState);
       }
     });
+
+    // Query active tab as fallback to ensure the script is responding
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const activeTab = tabs[0];
+      if (!activeTab) return;
+
+      chrome.tabs.sendMessage(activeTab.id, { action: 'GET_STATE' }, (response) => {
+        if (chrome.runtime.lastError || !response || !response.success) {
+          return;
+        }
+        updateUIFromState(response.state);
+      });
+    });
   }
 
-  syncStateWithActiveTab();
+  syncState();
 
   // --- 4. Listen for Live State Updates from Content Script ---
   chrome.runtime.onMessage.addListener((message) => {
@@ -210,6 +205,34 @@ document.addEventListener('DOMContentLoaded', () => {
         if (response && response.success) {
           updateUIFromState(response.state);
           showToast(settingsStatus, 'Veriler anında okundu ve sayaç sıfırlandı.', 'success');
+        }
+      });
+    });
+  });
+
+  // Clear Data Button
+  btnClearData.addEventListener('click', () => {
+    // Optimistically clear storage and UI
+    chrome.storage.local.get(['bankBotTrackingState'], (result) => {
+      const state = result.bankBotTrackingState || {};
+      state.lastData = [];
+      state.lastUpdatedTime = null;
+      state.error = null;
+      chrome.storage.local.set({ bankBotTrackingState: state });
+      updateUIFromState(state);
+    });
+
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const activeTab = tabs[0];
+      if (!activeTab) return;
+
+      chrome.tabs.sendMessage(activeTab.id, { action: 'CLEAR_DATA' }, (response) => {
+        if (chrome.runtime.lastError) {
+          return;
+        }
+        if (response && response.success) {
+          updateUIFromState(response.state);
+          showToast(settingsStatus, 'Tablo ve hafızadaki tüm veriler temizlendi.', 'success');
         }
       });
     });
