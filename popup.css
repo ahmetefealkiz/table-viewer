@@ -295,6 +295,31 @@ input[type="text"]:focus, input[type="number"]:focus {
   background-color: var(--accent-hover);
 }
 
+/* Green flash animation when settings are saved */
+@keyframes btn-success-pulse {
+  0% {
+    background-color: #10b981;
+    box-shadow: 0 0 14px rgba(16, 185, 129, 0.7);
+    color: #ffffff;
+    transform: scale(1.01);
+  }
+  50% {
+    background-color: #059669;
+    box-shadow: 0 0 18px rgba(16, 185, 129, 0.9);
+    color: #ffffff;
+    transform: scale(1);
+  }
+  100% {
+    background-color: var(--accent);
+    box-shadow: 0 0 0 0 rgba(16, 185, 129, 0);
+    color: var(--accent-contrast);
+  }
+}
+
+.btn-saved-success {
+  animation: btn-success-pulse 1.2s ease-in-out forwards !important;
+}
+
 .btn-start {
   background-color: var(--accent);
   color: var(--accent-contrast);

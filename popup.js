@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Settings Form Inputs
   const settingsForm = document.getElementById('settings-form');
-  const settingsStatus = document.getElementById('settings-status');
+  const btnSaveSettings = document.getElementById('btn-save-settings');
   const inputTargetUrl = document.getElementById('target-url');
   const inputBaseMinutes = document.getElementById('base-interval-minutes');
   const inputWaitSeconds = document.getElementById('wait-seconds');
@@ -83,7 +83,14 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     chrome.storage.local.set({ bankBotSettings: newSettings }, () => {
-      showToast(settingsStatus, 'Ayarlar başarıyla kaydedildi!', 'success');
+      if (btnSaveSettings) {
+        btnSaveSettings.classList.remove('btn-saved-success');
+        void btnSaveSettings.offsetWidth; // Force CSS reflow to re-trigger animation
+        btnSaveSettings.classList.add('btn-saved-success');
+        setTimeout(() => {
+          btnSaveSettings.classList.remove('btn-saved-success');
+        }, 1200);
+      }
     });
   });
 
@@ -203,7 +210,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Force Read Button (Now Read & Reset Timer)
+  // Force Read Button (Read open account data & sync to Excel)
   btnForceRead.addEventListener('click', () => {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const activeTab = tabs[0];
@@ -211,13 +218,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
       chrome.tabs.sendMessage(activeTab.id, { action: 'FORCE_READ' }, (response) => {
         if (chrome.runtime.lastError) {
-          showStatus('Sayfa verileri okunamadı. Sayfayı yenileyip tekrar deneyin.', 'error');
+          showStatus('Sayfa verileri okunamadı. Lütfen banka sayfasında olduğunuzdan ve bir hesabın açık olduğundan emin olun.', 'error');
           return;
         }
 
         if (response && response.success) {
           updateUIFromState(response.state);
-          showToast(settingsStatus, 'Veriler anında okundu ve sayaç sıfırlandı.', 'success');
+          showStatus('Açık hesaptaki veriler okundu ve Excel\'e aktarıldı.', 'info');
         }
       });
     });
@@ -245,7 +252,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (response && response.success) {
           updateUIFromState(response.state);
-          showToast(settingsStatus, 'Tablo ve hafızadaki tüm veriler temizlendi.', 'success');
+          showStatus('Tablo ve hafızadaki tüm veriler temizlendi.', 'info');
         }
       });
     });
@@ -291,11 +298,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function showToast(element, message, type = 'success') {
+    if (!element) return;
     element.textContent = message;
     element.className = `toast ${type}`;
     element.classList.remove('hidden');
     setTimeout(() => {
-      element.classList.add('hidden');
+      if (element) element.classList.add('hidden');
     }, 3000);
   }
 

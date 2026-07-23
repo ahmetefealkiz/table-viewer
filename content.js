@@ -90,11 +90,9 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'FORCE_READ':
       getSettings((settings) => {
         trackingState.error = null;
-        trackingState.currentAccountIndex = 0;
-        trackingState.currentPhase = 'REFRESH_LIST';
-        trackingState.secondsLeft = 0;
-        saveState();
-        sendResponse({ success: true, state: trackingState });
+        runDataScan(settings, () => {
+          sendResponse({ success: true, state: trackingState });
+        });
       });
       return true;
 
@@ -162,20 +160,22 @@ function doubleClickElementRandom(element) {
   }
 }
 
-// Find element by text content or input value (case insensitive, partial match)
-function findElementByText(text, container = document) {
+// Find element by text content or input value (exact or partial match, case sensitivity option)
+function findElementByText(text, container = document, exact = false, caseSensitive = false) {
   if (!text) return null;
-  const searchText = text.toLowerCase().trim();
+  const searchText = caseSensitive ? text.trim() : text.toLowerCase().trim();
   const allElements = container.querySelectorAll('*');
   let bestMatch = null;
   
   for (const el of allElements) {
     // Check input value, innerText, textContent or value attribute
-    const val = (el.value || el.innerText || el.textContent || el.getAttribute('value') || '').toLowerCase().trim();
-    if (val.includes(searchText)) {
+    const rawVal = (el.value || el.innerText || el.textContent || el.getAttribute('value') || '').trim();
+    const val = caseSensitive ? rawVal : rawVal.toLowerCase();
+    const isMatch = exact ? (val === searchText) : val.includes(searchText);
+    if (isMatch) {
       bestMatch = el;
       // Prefer inputs, buttons, list items, or leaf elements
-      if (el.tagName === 'INPUT' || el.tagName === 'BUTTON' || el.classList.contains('x-combo-list-item') || el.classList.contains('filter-btn') || el.children.length === 0) {
+      if (el.tagName === 'INPUT' || el.tagName === 'BUTTON' || el.classList.contains('x-btn-text') || el.classList.contains('x-btn') || el.classList.contains('x-combo-list-item') || el.classList.contains('filter-btn') || el.children.length === 0) {
         break;
       }
     }
@@ -248,21 +248,34 @@ function clickLast7DaysOption() {
   } catch (e) {}
 }
 
-// Click Go button by text
+// Click Go button by text (Strict case-sensitive exact match for "Go")
 function clickGoButton() {
   try {
-    let el = findElementByText('go');
-    if (el) {
-      clickElementRandom(el);
-    } else {
-      const btns = document.querySelectorAll('button, input[type="button"], input[type="submit"], .x-btn, .go-btn');
-      for (const btn of btns) {
-        const txt = (btn.value || btn.innerText || btn.textContent || '').toLowerCase().trim();
-        if (txt === 'go' || txt.includes('go')) {
-          clickElementRandom(btn);
+    // Search inside open window / modal first, then overall document
+    const windows = document.querySelectorAll('.x-window:not([style*="display: none"]), .x-window');
+    const containers = windows.length > 0 ? [...Array.from(windows), document] : [document];
+
+    let targetBtn = null;
+
+    for (const container of containers) {
+      // 1. Direct search for buttons, inputs, ExtJS button elements whose text is EXACTLY "Go" (case sensitive)
+      const candidates = container.querySelectorAll('button, input[type="button"], input[type="submit"], .x-btn-text, .x-btn, .go-btn');
+      for (const btn of candidates) {
+        const txt = (btn.value || btn.innerText || btn.textContent || '').trim();
+        if (txt === 'Go') {
+          targetBtn = btn;
           break;
         }
       }
+      if (targetBtn) break;
+
+      // 2. Fallback: Case-sensitive exact text match across elements in container
+      targetBtn = findElementByText('Go', container, true, true);
+      if (targetBtn) break;
+    }
+
+    if (targetBtn) {
+      clickElementRandom(targetBtn);
     }
   } catch (e) {}
 }
