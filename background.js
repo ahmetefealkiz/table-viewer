@@ -246,6 +246,20 @@ function getToken(callback) {
 }
 
 /**
+ * Helper to get formatted timestamp string (DD.MM.YYYY HH:mm:ss) right before writing to Sheet
+ */
+function getFormattedTimestamp() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  const seconds = String(now.getSeconds()).padStart(2, '0');
+  return `${day}.${month}.${year} ${hours}:${minutes}:${seconds}`;
+}
+
+/**
  * Sync scraped data to connected Google Sheet
  */
 function syncDataToSheet(dataList, sendResponse) {
@@ -284,20 +298,21 @@ function syncDataToSheet(dataList, sendResponse) {
           const values = responseData.values || [];
 
           if (values.length === 0) {
-            throw new Error('E-Tablo tamamen boş. Lütfen ilk satıra kolon başlıklarını (Currency, Date, Narration, Reference, Credit) ekleyin.');
+            throw new Error('E-Tablo tamamen boş. Lütfen ilk satıra kolon başlıklarını (TIMESTAMP, Currency, Date, Narration, Reference, Credit) ekleyin.');
           }
 
           // Header row is index 0
           const headerRow = values[0].map(h => (h || '').toString().trim().toLowerCase());
 
+          const timestampIdx = headerRow.indexOf('timestamp');
           const currencyIdx = headerRow.indexOf('currency');
           const dateIdx = headerRow.indexOf('date');
           const narrationIdx = headerRow.indexOf('narration');
           const refIdx = headerRow.indexOf('reference');
           const creditIdx = headerRow.indexOf('credit');
 
-          if (currencyIdx === -1 || dateIdx === -1 || narrationIdx === -1 || refIdx === -1 || creditIdx === -1) {
-            throw new Error('Seçilen E-Tabloda zorunlu kolon başlıklarından (Currency, Date, Narration, Reference, Credit) biri eksik.');
+          if (timestampIdx === -1 || currencyIdx === -1 || dateIdx === -1 || narrationIdx === -1 || refIdx === -1 || creditIdx === -1) {
+            throw new Error('Seçilen E-Tabloda zorunlu kolon başlıklarından (TIMESTAMP, Currency, Date, Narration, Reference, Credit) biri eksik.');
           }
 
           let itemsToWrite = [];
@@ -317,7 +332,7 @@ function syncDataToSheet(dataList, sendResponse) {
             itemsToWrite = [...dataList].reverse();
           } else {
             // 1.1. Rows with the selected currency exist in E-Tablo!
-            // Get the LAST recorded transaction for this specific currency
+            // Get the LAST recorded transaction for this specific currency (TIMESTAMP is ignored in matching)
             const lastRecordedRow = sameCurrencyRows[sameCurrencyRows.length - 1];
             
             const lastRecordedObj = {
@@ -357,9 +372,14 @@ function syncDataToSheet(dataList, sendResponse) {
             return;
           }
 
+          // Take timestamp right before saving to Google Sheets
+          const currentTimestamp = getFormattedTimestamp();
+
           // Format itemsToWrite into 2D row arrays matching the Sheet column order
           const formattedRows = itemsToWrite.map(item => {
+            item.timestamp = currentTimestamp;
             const row = new Array(headerRow.length).fill('');
+            if (timestampIdx !== -1) row[timestampIdx] = currentTimestamp;
             row[currencyIdx] = item.currency || '';
             row[dateIdx] = item.date || '';
             row[narrationIdx] = item.narration || '';
@@ -399,7 +419,8 @@ function syncDataToSheet(dataList, sendResponse) {
 }
 
 /**
- * Row Matcher: Requires ALL 5 columns (Currency, Date, Narration, Reference, Credit) to match strictly
+ * Row Matcher: Compares ONLY the 5 bank transaction columns (Currency, Date, Narration, Reference, Credit).
+ * NOTE: TIMESTAMP is NOT compared or used in row matching logic.
  */
 function isRowMatch(item, lastRecordedObj) {
   if (!item || !lastRecordedObj) return false;

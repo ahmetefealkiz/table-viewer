@@ -102,7 +102,15 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   return true;
 });
 
-const TARGET_ACCOUNTS = ['0514575556901', '0514575556902', '0514575556903'];
+const TARGET_ACCOUNTS = [
+  '0514575556901',
+  '0514575556902',
+  '0514575556903',
+  '1015865992701',
+  '1025865992702',
+  '1025865992703',
+  '1025865992704'
+];
 
 // Single click on element at a random coordinate inside element bounds
 function clickElementRandom(element) {
@@ -193,21 +201,16 @@ function clickListRefresh() {
   } catch (e) {}
 }
 
-// Double click account by text number
+// Double click account by text number. Returns true if account element found and clicked, false otherwise.
 function openAccountByNumber(accountNumber) {
   try {
     const targetEl = findElementByText(accountNumber);
     if (targetEl) {
       doubleClickElementRandom(targetEl);
-    } else {
-      const allRows = Array.from(document.querySelectorAll('.x-grid3-row')).filter(r => !r.closest('.x-window'));
-      if (allRows.length > trackingState.currentAccountIndex) {
-        const row = allRows[trackingState.currentAccountIndex];
-        const cell = row.querySelector('.x-grid3-cell-inner') || row;
-        doubleClickElementRandom(cell);
-      }
+      return true;
     }
   } catch (e) {}
+  return false;
 }
 
 // Click Current Day filter by text
@@ -335,11 +338,29 @@ function processNextPhase(settings) {
       break;
 
     case 'OPEN_ACCOUNT':
-      // Step 2: Double click account number by text
-      const accNumber = TARGET_ACCOUNTS[trackingState.currentAccountIndex] || TARGET_ACCOUNTS[0];
-      openAccountByNumber(accNumber);
-      trackingState.currentPhase = 'CLICK_FILTER';
-      trackingState.secondsLeft = 5; // Wait 5s for modal to open
+      // Step 2: Double click account number by text if found on page
+      const accNumber = TARGET_ACCOUNTS[trackingState.currentAccountIndex];
+      const isOpened = openAccountByNumber(accNumber);
+
+      if (isOpened) {
+        // Account found -> proceed with modal operations
+        trackingState.currentPhase = 'CLICK_FILTER';
+        trackingState.secondsLeft = 5; // Wait 5s for modal to open
+      } else {
+        // Account not found -> skip silently to next account in list
+        trackingState.currentAccountIndex++;
+        if (trackingState.currentAccountIndex < TARGET_ACCOUNTS.length) {
+          trackingState.currentPhase = 'OPEN_ACCOUNT';
+          trackingState.secondsLeft = 0; // Check next account immediately
+        } else {
+          // Finished checking all 7 accounts in list -> reset to IDLE and wait for next interval
+          trackingState.currentAccountIndex = 0;
+          trackingState.currentPhase = 'IDLE';
+          const newInterval = getRandomInterval(settings.baseMinutes);
+          trackingState.intervalSeconds = newInterval;
+          trackingState.secondsLeft = newInterval;
+        }
+      }
       break;
 
     case 'CLICK_FILTER':
@@ -384,11 +405,11 @@ function processNextPhase(settings) {
       trackingState.currentAccountIndex++;
       
       if (trackingState.currentAccountIndex < TARGET_ACCOUNTS.length) {
-        // Move to next account
-        trackingState.currentPhase = 'REFRESH_LIST';
+        // Move to next account in list
+        trackingState.currentPhase = 'OPEN_ACCOUNT';
         trackingState.secondsLeft = 1; // 1 second sleep
       } else {
-        // Finished all 3 accounts -> reset to IDLE and set random timer
+        // Finished all 7 accounts in list -> reset to IDLE and set random timer
         trackingState.currentAccountIndex = 0;
         trackingState.currentPhase = 'IDLE';
         const newInterval = getRandomInterval(settings.baseMinutes);
