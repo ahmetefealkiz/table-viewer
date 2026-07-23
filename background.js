@@ -14,8 +14,12 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       fetchSpreadsheets(sendResponse);
       return true;
 
+    case 'FETCH_WORKSHEETS':
+      fetchWorksheets(request.spreadsheetId, sendResponse);
+      return true;
+
     case 'VALIDATE_AND_CONNECT_SHEET':
-      validateAndConnectSheet(request.spreadsheetId, request.spreadsheetName, sendResponse);
+      validateAndConnectSheet(request.spreadsheetId, request.spreadsheetName, request.transactionSheet, request.errorSheet, sendResponse);
       return true;
 
     case 'DISCONNECT_SHEET':
@@ -28,6 +32,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case 'SYNC_TO_SHEET':
       syncDataToSheet(request.dataList, sendResponse);
+      return true;
+
+    case 'LOG_ERROR_TO_SHEET':
+      logErrorToSheet(request.errorMessage, sendResponse);
       return true;
   }
 });
@@ -133,10 +141,9 @@ function fetchSpreadsheets(sendResponse) {
 }
 
 /**
- * Validate Columns in Selected Sheet
- * Required headers: Date, Narration, Reference, Credit (case-insensitive)
+ * Fetch Worksheets (Tabs) inside a specific Spreadsheet
  */
-function validateAndConnectSheet(spreadsheetId, spreadsheetName, sendResponse) {
+function fetchWorksheets(spreadsheetId, sendResponse) {
   if (!spreadsheetId) {
     sendResponse({ success: false, error: 'Geçersiz tablo ID.' });
     return;
@@ -148,52 +155,101 @@ function validateAndConnectSheet(spreadsheetId, spreadsheetName, sendResponse) {
       return;
     }
 
-    // Fetch the first row of the sheet (A1:Z1 or 1:1)
-    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/1:1`;
+    const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}?includeGridData=false`;
 
     fetch(url, {
       headers: { Authorization: `Bearer ${token}` }
     })
-      .then(res => {
-        if (res.status === 401) {
-          throw new Error('Oturum süresi doldu. Lütfen tekrar giriş yapın.');
-        }
+      .then(async res => {
+        if (res.status === 401) throw new Error('Oturum süresi doldu. Lütfen tekrar giriş yapın.');
         if (!res.ok) {
-          throw new Error(`Sheets API Hatası: ${res.statusText}`);
+          const errData = await res.json().catch(() => ({}));
+          const apiMsg = errData.error ? errData.error.message : res.statusText;
+          throw new Error(`Sheets API Hatası (${res.status}): ${apiMsg}`);
         }
         return res.json();
       })
-      .then(async data => {
-        const rows = data.values;
-        if (!rows || rows.length === 0 || !rows[0]) {
-          throw new Error('Seçilen tablonun ilk satırında hiçbir başlık verisi bulunamadı.');
+      .then(data => {
+        const sheets = (data.sheets || []).map(s => s.properties && s.properties.title).filter(Boolean);
+        if (sheets.length === 0) {
+          throw new Error('E-Tablo içerisinde hiçbir sekme (sayfa) bulunamadı.');
+        }
+        sendResponse({ success: true, sheets });
+      })
+      .catch(error => {
+        sendResponse({ success: false, error: error.message });
+      });
+  });
+}
+
+/**
+ * Validate Columns in Selected Transaction and Error Worksheets
+ */
+function validateAndConnectSheet(spreadsheetId, spreadsheetName, transactionSheet, errorSheet, sendResponse) {
+  if (!spreadsheetId || !transactionSheet || !errorSheet) {
+    sendResponse({ success: false, error: 'Lütfen hem Transaction hem de Error Log sayfalarını (sekmelerini) seçin.' });
+    return;
+  }
+
+  getToken((token, err) => {
+    if (err || !token) {
+      sendResponse({ success: false, error: err || 'Oturum açık değil.' });
+      return;
+    }
+
+    // 1. Validate Transaction Sheet Headers
+    const transUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'${encodeURIComponent(transactionSheet)}'!1:1`;
+
+    fetch(transUrl, { headers: { Authorization: `Bearer ${token}` } })
+      .then(res => {
+        if (res.status === 401) throw new Error('Oturum süresi doldu. Lütfen tekrar giriş yapın.');
+        if (!res.ok) throw new Error(`Transaction sekmesi okunamadı: ${res.statusText}`);
+        return res.json();
+      })
+      .then(transData => {
+        const transRows = transData.values;
+        if (!transRows || transRows.length === 0 || !transRows[0]) {
+          throw new Error(`'${transactionSheet}' sekmesinin ilk satırında başlık bulunamadı.`);
+        }
+        const transHeaders = transRows[0].map(h => (h || '').toString().trim().toLowerCase());
+        const REQUIRED_TRANS = ['timestamp', 'currency', 'date', 'narration', 'reference', 'credit'];
+        const missingTrans = REQUIRED_TRANS.filter(req => !transHeaders.includes(req));
+
+        if (missingTrans.length > 0) {
+          const capMissing = missingTrans.map(m => m === 'timestamp' ? 'TIMESTAMP' : m.charAt(0).toUpperCase() + m.slice(1));
+          throw new Error(`Transaction sekmesinde ('${transactionSheet}') zorunlu kolon(lar) bulunamadı: ${capMissing.join(', ')}.\nLütfen ilk satıra TIMESTAMP, Currency, Date, Narration, Reference ve Credit başlıklarını ekleyin.`);
         }
 
-        const headers = rows[0].map(h => (h || '').toString().trim().toLowerCase());
-        const REQUIRED_HEADERS = ['currency', 'date', 'narration', 'reference', 'credit'];
-        const missingHeaders = [];
+        // 2. Validate Error Sheet Headers
+        const errorUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'${encodeURIComponent(errorSheet)}'!1:1`;
+        return fetch(errorUrl, { headers: { Authorization: `Bearer ${token}` } });
+      })
+      .then(res => {
+        if (res.status === 401) throw new Error('Oturum süresi doldu. Lütfen tekrar giriş yapın.');
+        if (!res.ok) throw new Error(`Error Log sekmesi okunamadı: ${res.statusText}`);
+        return res.json();
+      })
+      .then(async errData => {
+        const errRows = errData.values;
+        if (!errRows || errRows.length === 0 || !errRows[0]) {
+          throw new Error(`'${errorSheet}' sekmesinin ilk satırında başlık bulunamadı.`);
+        }
+        const errHeaders = errRows[0].map(h => (h || '').toString().trim().toLowerCase());
+        const REQUIRED_ERR = ['timestamp', 'error detail'];
+        const missingErr = REQUIRED_ERR.filter(req => !errHeaders.includes(req));
 
-        REQUIRED_HEADERS.forEach(req => {
-          if (!headers.includes(req)) {
-            // Capitalize for display
-            missingHeaders.push(req.charAt(0).toUpperCase() + req.slice(1));
-          }
-        });
-
-        if (missingHeaders.length > 0) {
-          sendResponse({
-            success: false,
-            error: `Seçilen E-Tabloda zorunlu kolon(lar) bulunamadı: ${missingHeaders.join(', ')}.\nLütfen tablonun ilk satırına Currency, Date, Narration, Reference ve Credit başlıklarını ekleyin.`
-          });
-          return;
+        if (missingErr.length > 0) {
+          const capMissing = missingErr.map(m => m === 'timestamp' ? 'Timestamp' : 'Error Detail');
+          throw new Error(`Error Log sekmesinde ('${errorSheet}') zorunlu kolon(lar) bulunamadı: ${capMissing.join(', ')}.\nLütfen ilk satıra Timestamp ve Error Detail başlıklarını ekleyin.`);
         }
 
         // Save selected sheet details
         const selectedSheetData = {
           id: spreadsheetId,
           name: spreadsheetName,
-          connectedAt: new Date().toLocaleString(),
-          headers: rows[0]
+          transactionSheet: transactionSheet,
+          errorSheet: errorSheet,
+          connectedAt: new Date().toLocaleString()
         };
 
         await chrome.storage.local.set({ bankBotSelectedSheet: selectedSheetData });
@@ -282,9 +338,10 @@ function syncDataToSheet(dataList, sendResponse) {
       }
 
       const spreadsheetId = sheetData.id;
+      const transSheet = sheetData.transactionSheet || 'Sheet1';
 
       // 1. Fetch current values from Google Sheet
-      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/1:100000`;
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'${encodeURIComponent(transSheet)}'!1:100000`;
 
       fetch(url, {
         headers: { Authorization: `Bearer ${token}` }
@@ -389,7 +446,7 @@ function syncDataToSheet(dataList, sendResponse) {
           });
 
           // 2. Append formattedRows to Google Sheet
-          const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/1:1:append?valueInputOption=USER_ENTERED`;
+          const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'${encodeURIComponent(transSheet)}'!1:1:append?valueInputOption=USER_ENTERED`;
 
           const appendRes = await fetch(appendUrl, {
             method: 'POST',
@@ -419,8 +476,79 @@ function syncDataToSheet(dataList, sendResponse) {
 }
 
 /**
- * Row Matcher: Compares ONLY the 5 bank transaction columns (Currency, Date, Narration, Reference, Credit).
- * NOTE: TIMESTAMP is NOT compared or used in row matching logic.
+ * Sync error details to Error Log Worksheet
+ */
+function logErrorToSheet(errorMessage, sendResponse) {
+  if (!errorMessage) {
+    if (sendResponse) sendResponse({ success: false, error: 'Hata mesajı boş.' });
+    return;
+  }
+
+  chrome.storage.local.get(['bankBotSelectedSheet'], (result) => {
+    const sheetData = result.bankBotSelectedSheet;
+    if (!sheetData || !sheetData.id || !sheetData.errorSheet) {
+      if (sendResponse) sendResponse({ success: false, error: 'Bağlı Error Log sekmesi bulunamadı.' });
+      return;
+    }
+
+    getToken((token, err) => {
+      if (err || !token) {
+        if (sendResponse) sendResponse({ success: false, error: err || 'Oturum açık değil.' });
+        return;
+      }
+
+      const spreadsheetId = sheetData.id;
+      const errorSheet = sheetData.errorSheet;
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'${encodeURIComponent(errorSheet)}'!1:100`;
+
+      fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+        .then(res => res.json())
+        .then(async data => {
+          const values = data.values || [];
+          let timestampIdx = 0;
+          let errorDetailIdx = 1;
+          let colCount = 2;
+
+          if (values.length > 0 && values[0]) {
+            const headerRow = values[0].map(h => (h || '').toString().trim().toLowerCase());
+            const tIdx = headerRow.indexOf('timestamp');
+            const eIdx = headerRow.indexOf('error detail');
+            if (tIdx !== -1) timestampIdx = tIdx;
+            if (eIdx !== -1) errorDetailIdx = eIdx;
+            colCount = Math.max(headerRow.length, 2);
+          }
+
+          const currentTimestamp = getFormattedTimestamp();
+          const row = new Array(colCount).fill('');
+          row[timestampIdx] = currentTimestamp;
+          row[errorDetailIdx] = errorMessage.toString();
+
+          const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'${encodeURIComponent(errorSheet)}'!1:1:append?valueInputOption=USER_ENTERED`;
+
+          const appendRes = await fetch(appendUrl, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ values: [row] })
+          });
+
+          if (!appendRes.ok) {
+            throw new Error(`Error log kaydetme hatası: ${appendRes.statusText}`);
+          }
+
+          if (sendResponse) sendResponse({ success: true });
+        })
+        .catch(error => {
+          if (sendResponse) sendResponse({ success: false, error: error.message });
+        });
+    });
+  });
+}
+
+/**
+ * Row Matcher: Compares ONLY the Reference (REF) column to determine existing vs new data.
  */
 function isRowMatch(item, lastRecordedObj) {
   if (!item || !lastRecordedObj) return false;
@@ -428,25 +556,10 @@ function isRowMatch(item, lastRecordedObj) {
   // Normalize string: strip HTML non-breaking spaces (\u00a0), replace multiple spaces, trim, lowercase
   const norm = (val) => (val || '').toString().replace(/[\s\u00a0]+/g, ' ').trim().toLowerCase();
 
-  // Normalize numeric string for credit (e.g. "100.00 TL" vs "100.00")
-  const normCredit = (val) => {
-    const s = norm(val).replace(/[^0-9.,-]/g, '');
-    if (!s) return norm(val);
-    if (s.includes(',') && s.includes('.')) {
-      const parsed = parseFloat(s.replace(/\./g, '').replace(',', '.'));
-      return isNaN(parsed) ? norm(val) : parsed.toFixed(2);
-    }
-    const parsed = parseFloat(s.replace(',', '.'));
-    return isNaN(parsed) ? norm(val) : parsed.toFixed(2);
-  };
+  const itemRef = norm(item.ref);
+  const targetRef = norm(lastRecordedObj.ref);
 
-  const currencyMatch = norm(item.currency) === norm(lastRecordedObj.currency);
-  const dateMatch = norm(item.date) === norm(lastRecordedObj.date);
-  const narrationMatch = norm(item.narration) === norm(lastRecordedObj.narration);
-  const refMatch = norm(item.ref) === norm(lastRecordedObj.ref);
-  const creditMatch = (norm(item.credit) === norm(lastRecordedObj.credit)) || (normCredit(item.credit) === normCredit(lastRecordedObj.credit));
+  if (!itemRef || !targetRef) return false;
 
-  const ccyOk = (!item.currency || !lastRecordedObj.currency) ? true : currencyMatch;
-
-  return ccyOk && dateMatch && narrationMatch && refMatch && creditMatch;
+  return itemRef === targetRef;
 }

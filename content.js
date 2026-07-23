@@ -45,6 +45,17 @@ chrome.storage.onChanged.addListener((changes, areaName) => {
   }
 });
 
+// Helper to validate target URL strictly (prevents http://, https://, wildcards, or empty inputs)
+function isValidTargetUrl(rawUrl) {
+  if (!rawUrl || typeof rawUrl !== 'string') return false;
+  const trimmed = rawUrl.trim().toLowerCase();
+  let clean = trimmed.replace(/^https?:\/\//i, '').replace(/^\/\//, '').replace(/[\/*]+$/, '').trim();
+  if (!clean || clean === 'http' || clean === 'https' || clean === 'http:' || clean === 'https:') {
+    return false;
+  }
+  return true;
+}
+
 // Listen for messages from Popup
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   switch (request.action) {
@@ -62,6 +73,23 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case 'START_TRACKING':
       getSettings((settings) => {
+        if (!isValidTargetUrl(settings.targetUrl)) {
+          trackingState.error = 'Ayarlar kısmında geçerli ve net bir Hedef URL tanımlanmamış. Sadece "http://" veya genel ifadeler kabul edilmez.';
+          trackingState.isRunning = false;
+          saveState();
+          sendResponse({ success: false, error: trackingState.error, state: trackingState });
+          return;
+        }
+
+        const accounts = getAccountList(settings);
+        if (!accounts || accounts.length === 0) {
+          trackingState.error = 'Lütfen önce Ayarlar kısmından izlenecek hesap numaralarını girin.';
+          trackingState.isRunning = false;
+          saveState();
+          sendResponse({ success: false, error: trackingState.error, state: trackingState });
+          return;
+        }
+
         const interval = getRandomInterval(settings.baseMinutes);
         trackingState.intervalSeconds = interval;
         trackingState.secondsLeft = 0; // Trigger process immediately
@@ -96,21 +124,38 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       });
       return true;
 
+    case 'OPEN_SPECIFIC_ACCOUNT':
+      if (!request.accountNumber) {
+        sendResponse({ success: false, error: 'Hesap numarası belirtilmedi.' });
+        break;
+      }
+      try {
+        const isOpened = openAccountByNumber(request.accountNumber);
+        if (isOpened) {
+          sendResponse({ success: true });
+        } else {
+          sendResponse({ success: false, error: `"${request.accountNumber}" numaralı hesap ekranda bulunamadı.` });
+        }
+      } catch (err) {
+        sendResponse({ success: false, error: err.message || 'Hesap açılırken bir hata oluştu.' });
+      }
+      break;
+
     default:
       sendResponse({ success: false, error: 'Bilinmeyen işlem' });
   }
   return true;
 });
 
-const TARGET_ACCOUNTS = [
-  '0514575556901',
-  '0514575556902',
-  '0514575556903',
-  '1015865992701',
-  '1025865992702',
-  '1025865992703',
-  '1025865992704'
-];
+function getAccountList(settings) {
+  if (settings && settings.accountNumbers && typeof settings.accountNumbers === 'string') {
+    return settings.accountNumbers
+      .split(/[\n,;]+/)
+      .map(acc => acc.trim())
+      .filter(acc => acc.length > 0);
+  }
+  return [];
+}
 
 // Single click on element at a random coordinate inside element bounds
 function clickElementRandom(element) {
@@ -182,8 +227,8 @@ function findElementByText(text, container = document, exact = false, caseSensit
     const isMatch = exact ? (val === searchText) : val.includes(searchText);
     if (isMatch) {
       bestMatch = el;
-      // Prefer inputs, buttons, list items, or leaf elements
-      if (el.tagName === 'INPUT' || el.tagName === 'BUTTON' || el.classList.contains('x-btn-text') || el.classList.contains('x-btn') || el.classList.contains('x-combo-list-item') || el.classList.contains('filter-btn') || el.children.length === 0) {
+      // Prefer inputs, buttons, list items, cell inners, or leaf elements
+      if (el.tagName === 'INPUT' || el.tagName === 'BUTTON' || el.classList.contains('x-grid3-cell-inner') || el.classList.contains('x-btn-text') || el.classList.contains('x-btn') || el.classList.contains('x-combo-list-item') || el.classList.contains('filter-btn') || el.children.length === 0) {
         break;
       }
     }
@@ -201,10 +246,10 @@ function clickListRefresh() {
   } catch (e) {}
 }
 
-// Double click account by text number. Returns true if account element found and clicked, false otherwise.
+// Double click account by text number (Strict exact match required). Returns true if account element found and clicked, false otherwise.
 function openAccountByNumber(accountNumber) {
   try {
-    const targetEl = findElementByText(accountNumber);
+    const targetEl = findElementByText(accountNumber, document, true);
     if (targetEl) {
       doubleClickElementRandom(targetEl);
       return true;
@@ -323,6 +368,16 @@ function getSettings(callback) {
 }
 
 function processNextPhase(settings) {
+  const targetAccounts = getAccountList(settings);
+
+  if (!targetAccounts || targetAccounts.length === 0) {
+    trackingState.error = 'Lütfen önce Ayarlar kısmından izlenecek hesap numaralarını girin.';
+    trackingState.isRunning = false;
+    stopTrackingEngine();
+    saveState();
+    return;
+  }
+
   switch (trackingState.currentPhase) {
     case 'IDLE':
       trackingState.currentAccountIndex = 0;
@@ -339,7 +394,7 @@ function processNextPhase(settings) {
 
     case 'OPEN_ACCOUNT':
       // Step 2: Double click account number by text if found on page
-      const accNumber = TARGET_ACCOUNTS[trackingState.currentAccountIndex];
+      const accNumber = targetAccounts[trackingState.currentAccountIndex];
       const isOpened = openAccountByNumber(accNumber);
 
       if (isOpened) {
@@ -349,11 +404,11 @@ function processNextPhase(settings) {
       } else {
         // Account not found -> skip silently to next account in list
         trackingState.currentAccountIndex++;
-        if (trackingState.currentAccountIndex < TARGET_ACCOUNTS.length) {
+        if (trackingState.currentAccountIndex < targetAccounts.length) {
           trackingState.currentPhase = 'OPEN_ACCOUNT';
           trackingState.secondsLeft = 0; // Check next account immediately
         } else {
-          // Finished checking all 7 accounts in list -> reset to IDLE and wait for next interval
+          // Finished checking all accounts in list -> reset to IDLE and wait for next interval
           trackingState.currentAccountIndex = 0;
           trackingState.currentPhase = 'IDLE';
           const newInterval = getRandomInterval(settings.baseMinutes);
@@ -404,12 +459,12 @@ function processNextPhase(settings) {
       closeAccountModal();
       trackingState.currentAccountIndex++;
       
-      if (trackingState.currentAccountIndex < TARGET_ACCOUNTS.length) {
+      if (trackingState.currentAccountIndex < targetAccounts.length) {
         // Move to next account in list
         trackingState.currentPhase = 'OPEN_ACCOUNT';
         trackingState.secondsLeft = 1; // 1 second sleep
       } else {
-        // Finished all 7 accounts in list -> reset to IDLE and set random timer
+        // Finished all accounts in list -> reset to IDLE and set random timer
         trackingState.currentAccountIndex = 0;
         trackingState.currentPhase = 'IDLE';
         const newInterval = getRandomInterval(settings.baseMinutes);
@@ -471,10 +526,19 @@ function runDataScan(settings, onComplete) {
   };
 
   const currentUrl = window.location.href.toLowerCase();
-  const targetUrl = (settings.targetUrl || '').trim().toLowerCase();
+  const rawTarget = (settings.targetUrl || '').trim();
+
+  if (!isValidTargetUrl(rawTarget)) {
+    trackingState.error = 'Ayarlar kısmında geçerli ve net bir Hedef URL tanımlanmamış. Lütfen geçerli bir URL girin (Örn: banka.com/hesap).';
+    finish();
+    return;
+  }
+
+  const targetClean = rawTarget.toLowerCase().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  const currentClean = currentUrl.replace(/^https?:\/\//i, '');
 
   // URL Containment Check
-  if (targetUrl && !currentUrl.includes(targetUrl)) {
+  if (!currentClean.includes(targetClean)) {
     trackingState.error = `Mevcut URL ("${window.location.href}"), hedef URL'yi ("${settings.targetUrl}") kapsamıyor.`;
     finish();
     return;
@@ -572,8 +636,18 @@ function runDataScan(settings, onComplete) {
   }
 }
 
+let lastLoggedError = null;
+
 function saveState() {
   chrome.storage.local.set({ bankBotTrackingState: trackingState });
+
+  if (trackingState.error && trackingState.error !== lastLoggedError) {
+    lastLoggedError = trackingState.error;
+    chrome.runtime.sendMessage({ action: 'LOG_ERROR_TO_SHEET', errorMessage: trackingState.error }).catch(() => {});
+  } else if (!trackingState.error) {
+    lastLoggedError = null;
+  }
+
   // Broadcast update to popup if listening
   chrome.runtime.sendMessage({ action: 'STATE_UPDATE', state: trackingState }).catch(() => {
     // Ignore errors when popup is closed

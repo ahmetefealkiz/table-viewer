@@ -22,6 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const inputBaseMinutes = document.getElementById('base-interval-minutes');
   const inputWaitSeconds = document.getElementById('wait-seconds');
   const inputFallbackCurrency = document.getElementById('fallback-currency');
+  const inputAccountNumbers = document.getElementById('account-numbers');
   const inputHeaderDate = document.getElementById('header-date');
   const inputHeaderNarration = document.getElementById('header-narration');
   const inputHeaderRef = document.getElementById('header-ref');
@@ -32,11 +33,95 @@ document.addEventListener('DOMContentLoaded', () => {
     baseMinutes: 4,
     waitSeconds: 15,
     fallbackCurrency: '',
+    accountNumbers: '',
     headerDate: 'Transaction Date',
     headerNarration: 'Narration',
     headerRef: 'Transaction Reference',
     headerCredit: 'Credit'
   };
+
+  const accountsContainer = document.getElementById('account-buttons-container');
+  const accountsStatus = document.getElementById('accounts-status');
+
+  function showAccountsStatus(msg, type = 'info') {
+    if (accountsStatus) {
+      accountsStatus.textContent = msg;
+      accountsStatus.className = `status-banner ${type}`;
+      accountsStatus.classList.remove('hidden');
+    }
+  }
+
+  function hideAccountsStatus() {
+    if (accountsStatus) {
+      accountsStatus.classList.add('hidden');
+    }
+  }
+
+  function renderAccountButtons() {
+    if (!accountsContainer) return;
+    chrome.storage.local.get(['bankBotSettings'], (result) => {
+      const settings = result.bankBotSettings || DEFAULT_SETTINGS;
+      const rawAccs = settings.accountNumbers || '';
+      const accList = rawAccs
+        .split(/[\n,;]+/)
+        .map(a => a.trim())
+        .filter(a => a.length > 0);
+
+      accountsContainer.innerHTML = '';
+
+      if (accList.length === 0) {
+        accountsContainer.innerHTML = '<div class="empty-accounts-notice">Ayarlar sekmesinden henüz hesap numarası eklenmemiş.</div>';
+        return;
+      }
+
+      accList.forEach(acc => {
+        const btn = document.createElement('button');
+        btn.className = 'account-btn';
+        btn.innerHTML = `
+          <svg class="acc-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="2" y="5" width="20" height="14" rx="2"></rect>
+            <line x1="2" y1="10" x2="22" y2="10"></line>
+          </svg>
+          <span>${acc}</span>
+        `;
+
+        btn.addEventListener('click', () => {
+          hideAccountsStatus();
+          btn.classList.remove('account-btn-success', 'account-btn-error');
+          
+          chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+            const activeTab = tabs[0];
+            if (!activeTab) {
+              showAccountsStatus('Aktif sekme bulunamadı.', 'error');
+              return;
+            }
+
+            chrome.tabs.sendMessage(activeTab.id, { action: 'OPEN_SPECIFIC_ACCOUNT', accountNumber: acc }, (response) => {
+              if (chrome.runtime.lastError) {
+                showAccountsStatus('Banka sayfası yanıt vermiyor. Lütfen doğru sekmede olduğunuzdan emin olun.', 'error');
+                btn.classList.add('account-btn-error');
+                setTimeout(() => btn.classList.remove('account-btn-error'), 1000);
+                return;
+              }
+
+              if (response && response.success) {
+                showAccountsStatus(`"${acc}" numaralı hesap ekranda bulundu ve açıldı.`, 'success');
+                btn.classList.add('account-btn-success');
+                setTimeout(() => btn.classList.remove('account-btn-success'), 1200);
+              } else {
+                const err = (response && response.error) || `"${acc}" numaralı hesap ekranda bulunamadı.`;
+                showAccountsStatus(err, 'error');
+                btn.classList.add('account-btn-error');
+                setTimeout(() => btn.classList.remove('account-btn-error'), 1000);
+              }
+            });
+          });
+        });
+
+        accountsContainer.appendChild(btn);
+      });
+    });
+  }
 
   // --- 1. Tab Navigation (İzleme Ekranı is Default Active) ---
   tabBtns.forEach(btn => {
@@ -47,6 +132,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
       btn.classList.add('active');
       document.getElementById(`tab-${tabName}`).classList.add('active');
+
+      if (tabName === 'accounts') {
+        renderAccountButtons();
+      }
     });
   });
 
@@ -58,24 +147,64 @@ document.addEventListener('DOMContentLoaded', () => {
       inputBaseMinutes.value = settings.baseMinutes || 4;
       inputWaitSeconds.value = settings.waitSeconds || settings.intervalSeconds || 15;
       inputFallbackCurrency.value = settings.fallbackCurrency || '';
+      inputAccountNumbers.value = settings.accountNumbers !== undefined ? settings.accountNumbers : '';
       inputHeaderDate.value = settings.headerDate || DEFAULT_SETTINGS.headerDate;
       inputHeaderNarration.value = settings.headerNarration || DEFAULT_SETTINGS.headerNarration;
       inputHeaderRef.value = settings.headerRef || DEFAULT_SETTINGS.headerRef;
       inputHeaderCredit.value = settings.headerCredit || DEFAULT_SETTINGS.headerCredit;
+
+      renderAccountButtons();
     });
   }
 
   loadSettings();
 
+  const settingsError = document.getElementById('settings-error');
+
+  function showSettingsError(msg) {
+    if (settingsError) {
+      settingsError.textContent = msg;
+      settingsError.classList.remove('hidden');
+    }
+  }
+
+  function hideSettingsError() {
+    if (settingsError) {
+      settingsError.classList.add('hidden');
+    }
+  }
+
+  // Helper to validate target URL strictly (prevents http://, https://, wildcards, or empty inputs)
+  function isValidTargetUrl(rawUrl) {
+    if (!rawUrl || typeof rawUrl !== 'string') return false;
+    const trimmed = rawUrl.trim().toLowerCase();
+    let clean = trimmed.replace(/^https?:\/\//i, '').replace(/^\/\//, '').replace(/[\/*]+$/, '').trim();
+    if (!clean || clean === 'http' || clean === 'https' || clean === 'http:' || clean === 'https:') {
+      return false;
+    }
+    return true;
+  }
+
   // Save Settings
   settingsForm.addEventListener('submit', (e) => {
     e.preventDefault();
 
+    hideSettingsError();
+
+    const targetUrlVal = inputTargetUrl.value.trim();
+
+    if (!isValidTargetUrl(targetUrlVal)) {
+      inputTargetUrl.focus();
+      showSettingsError('Lütfen geçerli ve net bir Hedef URL girin (Örn: banka.com/hesap veya https://banka.com). Sadece "http://" veya "https://" kabul edilmez.');
+      return;
+    }
+
     const newSettings = {
-      targetUrl: inputTargetUrl.value.trim(),
+      targetUrl: targetUrlVal,
       baseMinutes: parseInt(inputBaseMinutes.value, 10) || 4,
       waitSeconds: parseInt(inputWaitSeconds.value, 10) || 15,
       fallbackCurrency: inputFallbackCurrency.value.trim(),
+      accountNumbers: inputAccountNumbers.value.trim(),
       headerDate: inputHeaderDate.value.trim(),
       headerNarration: inputHeaderNarration.value.trim(),
       headerRef: inputHeaderRef.value.trim(),
@@ -83,6 +212,8 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     chrome.storage.local.set({ bankBotSettings: newSettings }, () => {
+      hideSettingsError();
+      renderAccountButtons();
       if (btnSaveSettings) {
         btnSaveSettings.classList.remove('btn-saved-success');
         void btnSaveSettings.offsetWidth; // Force CSS reflow to re-trigger animation
@@ -327,15 +458,21 @@ document.addEventListener('DOMContentLoaded', () => {
   const sheetSelectionCard = document.getElementById('sheet-selection-card');
   const sheetsSelect = document.getElementById('sheets-select');
   const btnRefreshSheets = document.getElementById('btn-refresh-sheets');
+  const worksheetsContainer = document.getElementById('worksheets-container');
+  const transactionSheetSelect = document.getElementById('transaction-sheet-select');
+  const errorSheetSelect = document.getElementById('error-sheet-select');
   const btnConnectSheet = document.getElementById('btn-connect-sheet');
 
   const connectedSheetInfo = document.getElementById('connected-sheet-info');
   const connectedSheetName = document.getElementById('connected-sheet-name');
+  const connectedTransactionName = document.getElementById('connected-transaction-name');
+  const connectedErrorName = document.getElementById('connected-error-name');
   const connectedSheetDate = document.getElementById('connected-sheet-date');
   const btnDisconnectSheet = document.getElementById('btn-disconnect-sheet');
   const sheetsStatus = document.getElementById('sheets-status');
 
   let isFetchingSheets = false;
+  let isFetchingWorksheets = false;
 
   // Sync Google Auth & Sheet Connection Status on Load
   function syncGoogleStatus() {
@@ -355,8 +492,7 @@ document.addEventListener('DOMContentLoaded', () => {
       googleAuthLoggedIn.classList.remove('hidden');
       userEmailText.textContent = auth.userEmail || 'Giriş Yapıldı';
       sheetSelectionCard.classList.remove('hidden');
-      // Automatically load spreadsheets when logged in
-      loadSpreadsheets();
+      loadSpreadsheets(sheet ? sheet.id : null, sheet);
     } else {
       googleAuthLoggedOut.classList.remove('hidden');
       googleAuthLoggedIn.classList.add('hidden');
@@ -367,10 +503,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (sheet && sheet.id) {
       connectedSheetInfo.classList.remove('hidden');
       connectedSheetName.textContent = sheet.name || 'Bilinmeyen Tablo';
+      if (connectedTransactionName) connectedTransactionName.textContent = sheet.transactionSheet || 'Bilinmiyor';
+      if (connectedErrorName) connectedErrorName.textContent = sheet.errorSheet || 'Bilinmiyor';
       connectedSheetDate.textContent = sheet.connectedAt || '--';
     } else {
       connectedSheetInfo.classList.add('hidden');
       connectedSheetName.textContent = '--';
+      if (connectedTransactionName) connectedTransactionName.textContent = '--';
+      if (connectedErrorName) connectedErrorName.textContent = '--';
       connectedSheetDate.textContent = '--';
     }
   }
@@ -412,17 +552,18 @@ document.addEventListener('DOMContentLoaded', () => {
           showToast(sheetsStatus, 'Google hesabından çıkış yapıldı.', 'success');
           syncGoogleStatus();
           sheetsSelect.innerHTML = `<option value="">-- Menüyü açarak tabloları yükleyin --</option>`;
+          if (worksheetsContainer) worksheetsContainer.classList.add('hidden');
         }
       });
     });
   }
 
   // Fetch Spreadsheets Function
-  function loadSpreadsheets() {
+  function loadSpreadsheets(presetId = null, connectedData = null) {
     if (isFetchingSheets) return;
     isFetchingSheets = true;
 
-    const currentVal = sheetsSelect.value;
+    const currentVal = presetId || sheetsSelect.value;
     
     // Show loading state in first option if empty
     if (!sheetsSelect.options.length || sheetsSelect.options[0].value === '') {
@@ -455,13 +596,74 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         sheetsSelect.appendChild(opt);
       });
+
+      if (sheetsSelect.value) {
+        loadWorksheets(sheetsSelect.value, connectedData);
+      }
+    });
+  }
+
+  function loadWorksheets(spreadsheetId, connectedData = null) {
+    if (!spreadsheetId) {
+      if (worksheetsContainer) worksheetsContainer.classList.add('hidden');
+      return;
+    }
+    if (isFetchingWorksheets) return;
+    isFetchingWorksheets = true;
+
+    if (transactionSheetSelect) transactionSheetSelect.innerHTML = `<option value="">Sekmeler yükleniyor...</option>`;
+    if (errorSheetSelect) errorSheetSelect.innerHTML = `<option value="">Sekmeler yükleniyor...</option>`;
+    if (worksheetsContainer) worksheetsContainer.classList.remove('hidden');
+
+    chrome.runtime.sendMessage({ action: 'FETCH_WORKSHEETS', spreadsheetId }, (response) => {
+      isFetchingWorksheets = false;
+      if (chrome.runtime.lastError || !response || !response.success) {
+        const errorMsg = response?.error || 'Sekme listesi alınamadı.';
+        showToast(sheetsStatus, errorMsg, 'error');
+        if (transactionSheetSelect) transactionSheetSelect.innerHTML = `<option value="">-- Hata (${errorMsg}) --</option>`;
+        if (errorSheetSelect) errorSheetSelect.innerHTML = `<option value="">-- Hata (${errorMsg}) --</option>`;
+        return;
+      }
+
+      const sheets = response.sheets || [];
+      let transOptions = `<option value="">-- Transaction sekmesi seçin --</option>`;
+      let errOptions = `<option value="">-- Error Log sekmesi seçin --</option>`;
+
+      sheets.forEach((sheetName, index) => {
+        let isTransSelected = false;
+        let isErrSelected = false;
+
+        if (connectedData && connectedData.transactionSheet) {
+          isTransSelected = sheetName === connectedData.transactionSheet;
+        } else {
+          isTransSelected = index === 0;
+        }
+
+        if (connectedData && connectedData.errorSheet) {
+          isErrSelected = sheetName === connectedData.errorSheet;
+        } else {
+          isErrSelected = index === 1 || (sheets.length === 1 && index === 0);
+        }
+
+        transOptions += `<option value="${sheetName}" ${isTransSelected ? 'selected' : ''}>${sheetName}</option>`;
+        errOptions += `<option value="${sheetName}" ${isErrSelected ? 'selected' : ''}>${sheetName}</option>`;
+      });
+
+      if (transactionSheetSelect) transactionSheetSelect.innerHTML = transOptions;
+      if (errorSheetSelect) errorSheetSelect.innerHTML = errOptions;
     });
   }
 
   // Refetch spreadsheets every time user opens / interacts with dropdown
   if (sheetsSelect) {
     sheetsSelect.addEventListener('focus', () => {
-      loadSpreadsheets();
+      if (!sheetsSelect.options || sheetsSelect.options.length <= 1) {
+        loadSpreadsheets();
+      }
+    });
+
+    sheetsSelect.addEventListener('change', () => {
+      loadWorksheets(sheetsSelect.value);
     });
   }
 
@@ -479,9 +681,16 @@ document.addEventListener('DOMContentLoaded', () => {
       const selectedId = sheetsSelect.value;
       const selectedOption = sheetsSelect.options[sheetsSelect.selectedIndex];
       const selectedName = selectedOption ? selectedOption.textContent : '';
+      const transSheet = transactionSheetSelect ? transactionSheetSelect.value : '';
+      const errSheet = errorSheetSelect ? errorSheetSelect.value : '';
 
       if (!selectedId) {
-        showToast(sheetsStatus, 'Lütfen bir E-Tablo seçin.', 'error');
+        showToast(sheetsStatus, 'Lütfen bir E-Tablo dosyası seçin.', 'error');
+        return;
+      }
+
+      if (!transSheet || !errSheet) {
+        showToast(sheetsStatus, 'Lütfen hem Transaction hem de Error Log sekmelerini seçin.', 'error');
         return;
       }
 
@@ -491,16 +700,18 @@ document.addEventListener('DOMContentLoaded', () => {
       chrome.runtime.sendMessage({
         action: 'VALIDATE_AND_CONNECT_SHEET',
         spreadsheetId: selectedId,
-        spreadsheetName: selectedName
+        spreadsheetName: selectedName,
+        transactionSheet: transSheet,
+        errorSheet: errSheet
       }, (response) => {
         btnConnectSheet.disabled = false;
-        btnConnectSheet.textContent = 'Tabloyu Bağla ve Kontrol Et';
+        btnConnectSheet.textContent = 'Tabloları Bağla ve Kontrol Et';
 
         if (response && response.success) {
-          showToast(sheetsStatus, 'E-Tablo başarıyla doğrulandı ve bağlandı!', 'success');
+          showToast(sheetsStatus, 'E-Tablo sekmeleri başarıyla doğrulandı ve bağlandı!', 'success');
           syncGoogleStatus();
         } else {
-          const errorMsg = response?.error || 'Tablo doğrulanamadı.';
+          const errorMsg = response?.error || 'Tablolar doğrulanamadı.';
           showToast(sheetsStatus, errorMsg, 'error');
         }
       });
@@ -514,6 +725,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (response && response.success) {
           showToast(sheetsStatus, 'E-Tablo bağlantısı iptal edildi.', 'success');
           syncGoogleStatus();
+          if (worksheetsContainer) worksheetsContainer.classList.add('hidden');
         }
       });
     });

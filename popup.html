@@ -30,6 +30,13 @@
         </svg>
         İzleme Ekranı
       </button>
+      <button class="tab-btn" data-tab="accounts">
+        <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="5" width="20" height="14" rx="2"></rect>
+          <line x1="2" y1="10" x2="22" y2="10"></line>
+        </svg>
+        Hesaplar
+      </button>
       <button class="tab-btn" data-tab="settings">
         <svg class="tab-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="12" cy="12" r="3"></circle>
@@ -58,12 +65,22 @@
             <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polygon points="5 3 19 12 5 21 5 3"></polygon>
             </svg>
-            <span id="btn-toggle-text">Başlat</span>
+            <span id="btn-toggle-text">İzlemeyi Başlat</span>
           </button>
-          <button id="btn-force-read" class="btn btn-secondary" title="Ekranda açık olan hesaptaki verileri oku ve Excel'e kaydedip aktar">
+          
+          <button id="btn-force-read" class="btn btn-secondary">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path>
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path>
+            </svg>
             Oku
           </button>
-          <button id="btn-clear-data" class="btn btn-secondary" title="Tabloyu ve hafızadaki verileri temizle">
+
+          <button id="btn-clear-data" class="btn btn-secondary">
+            <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="3 6 5 6 21 6"></polyline>
+              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+            </svg>
             Temizle
           </button>
         </div>
@@ -76,19 +93,19 @@
         <div id="tracking-status" class="status-banner hidden"></div>
 
         <div class="table-container">
-          <table class="data-table" id="results-table">
+          <table class="data-table">
             <thead>
               <tr>
-                <th>CURRENCY</th>
-                <th>DATE</th>
-                <th>NARRATION</th>
-                <th>REF</th>
-                <th>CREDIT</th>
+                <th>Curr</th>
+                <th>Date</th>
+                <th>Narration</th>
+                <th>Reference</th>
+                <th>Credit</th>
               </tr>
             </thead>
             <tbody id="results-body">
               <tr class="empty-row">
-                <td colspan="5">İzleme başlatılmadı veya veri henüz okunmadı.</td>
+                <td colspan="5">Henüz veri taranmadı.</td>
               </tr>
             </tbody>
           </table>
@@ -100,13 +117,27 @@
         </div>
       </section>
 
+      <!-- Hesaplar Tab Content -->
+      <section id="tab-accounts" class="tab-content">
+        <div class="card">
+          <div class="card-header">
+            <h3>Kayıtlı Hesaplar</h3>
+          </div>
+          <p class="help-text" style="margin-bottom: 12px;">Ekranda açmak istediğiniz hesabın butonuna tıklayın. Bot sayfadaki ilgili hesap numarasını bularak çift tıklayacaktır.</p>
+          <div id="accounts-status" class="status-banner hidden" style="margin-bottom: 12px;"></div>
+          <div id="account-buttons-container" class="account-grid">
+            <!-- Dynamic account buttons will be loaded here -->
+          </div>
+        </div>
+      </section>
+
       <!-- Ayarlar Tab Content -->
       <section id="tab-settings" class="tab-content">
         <form id="settings-form">
           <div class="form-group">
             <label for="target-url">Hedef URL Kapsamı</label>
-            <input type="text" id="target-url" placeholder="Örn: banka.com/hesap" required>
-            <small class="help-text">Bu URL'yi içeren tüm alt rotalarda eklenti çalışır.</small>
+            <input type="text" id="target-url" placeholder="Örn: https://banka.com/hesap" required>
+            <small class="help-text">Net bir Hedef URL veya alan adı girin (Sadece 'http://' gibi genel ifadeler kabul edilmez).</small>
           </div>
 
           <div class="form-group">
@@ -125,6 +156,12 @@
             <label for="fallback-currency">Manuel / Yedek Currency (Para Birimi)</label>
             <input type="text" id="fallback-currency" placeholder="Örn: TL, USD, EUR">
             <small class="help-text">Sayfada Currency bulunamazsa veya test için bu para birimi kullanılır.</small>
+          </div>
+
+          <div class="form-group">
+            <label for="account-numbers">İzlenecek Hesap Numaraları</label>
+            <textarea id="account-numbers" rows="4" placeholder="Her satıra bir hesap numarası yazın" required></textarea>
+            <small class="help-text">Sırayla taranacak hesap numaraları (Her satıra bir hesap numarası yazın).</small>
           </div>
 
           <div class="divider">Aranacak Tablo Başlık Metinleri</div>
@@ -150,6 +187,8 @@
               <input type="text" id="header-credit" placeholder="Credit" required>
             </div>
           </div>
+
+          <div id="settings-error" class="status-banner error hidden" style="margin-top: 10px; margin-bottom: 10px;"></div>
 
           <div class="form-actions">
             <button type="submit" id="btn-save-settings" class="btn btn-primary">
@@ -195,7 +234,7 @@
           </div>
           
           <div class="form-group">
-            <label for="sheets-select">Hesabınızdaki E-Tablolar</label>
+            <label for="sheets-select">Hesabınızdaki E-Tablo Dosyası</label>
             <div class="select-wrapper">
               <select id="sheets-select">
                 <option value="">-- Menüyü açarak tabloları yükleyin --</option>
@@ -206,13 +245,33 @@
                 </svg>
               </button>
             </div>
-            <small class="help-text">Dropdown menüsü her açıldığında tablolar yeniden çekilir.</small>
+            <small class="help-text">Önce E-Tablo dosyasını seçin, ardından alt sekmeler yüklenecektir.</small>
           </div>
 
-          <div class="form-actions">
-            <button id="btn-connect-sheet" class="btn btn-primary btn-full">
-              Tabloyu Bağla ve Kontrol Et
-            </button>
+          <div id="worksheets-container" class="hidden">
+            <div class="form-group">
+              <label for="transaction-sheet-select">Transaction Log Sayfası (Sekme)</label>
+              <div class="select-wrapper">
+                <select id="transaction-sheet-select">
+                  <option value="">-- Sekme seçin --</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label for="error-sheet-select">Error Log Sayfası (Sekme)</label>
+              <div class="select-wrapper">
+                <select id="error-sheet-select">
+                  <option value="">-- Sekme seçin --</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button id="btn-connect-sheet" class="btn btn-primary btn-full">
+                Tabloları Bağla ve Kontrol Et
+              </button>
+            </div>
           </div>
 
           <!-- Aktif Bağlı Tablo Bilgisi -->
@@ -224,10 +283,12 @@
               <span>Aktif Bağlantı Yapıldı</span>
             </div>
             <div class="sheet-details">
-              <div><strong>Tablo Adı:</strong> <span id="connected-sheet-name">--</span></div>
+              <div><strong>Tablo Dosyası:</strong> <span id="connected-sheet-name">--</span></div>
+              <div><strong>Transaction Sekmesi:</strong> <span id="connected-transaction-name">--</span></div>
+              <div><strong>Error Log Sekmesi:</strong> <span id="connected-error-name">--</span></div>
               <div class="connected-date"><strong>Tarih:</strong> <span id="connected-sheet-date">--</span></div>
             </div>
-            <button id="btn-disconnect-sheet" class="btn btn-outline-danger btn-full">
+            <button id="btn-disconnect-sheet" class="btn btn-outline-danger btn-full" style="margin-top: 8px;">
               Tablo Bağlantısını Kes
             </button>
           </div>
