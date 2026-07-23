@@ -278,12 +278,12 @@ function clickAccountRefresh() {
   } catch (e) {}
 }
 
-// Close account modal (Class name based)
+// Close account modal (Class name based - 2nd close button)
 function closeAccountModal() {
   try {
     const closeBtns = document.querySelectorAll('.x-tool-close');
     if (closeBtns.length > 0) {
-      const targetBtn = closeBtns[closeBtns.length - 1];
+      const targetBtn = closeBtns.length >= 2 ? closeBtns[1] : closeBtns[0];
       clickElementRandom(targetBtn);
     }
   } catch (e) {}
