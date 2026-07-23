@@ -674,6 +674,35 @@ document.addEventListener('DOMContentLoaded', () => {
       loadSpreadsheets();
     });
   }
+  const sheetsConnMsg = document.getElementById('sheets-connection-message');
+  const btnScrollDown = document.getElementById('btn-scroll-down');
+
+  // Floating scroll down button click event
+  if (btnScrollDown) {
+    btnScrollDown.addEventListener('click', () => {
+      window.scrollTo({
+        top: document.body.scrollHeight,
+        behavior: 'smooth'
+      });
+    });
+  }
+
+  function resetConnectButton() {
+    if (btnConnectSheet) {
+      btnConnectSheet.classList.remove('btn-connect-success', 'btn-connect-error');
+      btnConnectSheet.textContent = 'Tabloları Bağla ve Kontrol Et';
+    }
+    if (sheetsConnMsg) {
+      sheetsConnMsg.classList.add('hidden');
+    }
+  }
+
+  // Reset button state when dropdown selection changes
+  [sheetsSelect, transactionSheetSelect, errorSheetSelect].forEach(selectEl => {
+    if (selectEl) {
+      selectEl.addEventListener('change', resetConnectButton);
+    }
+  });
 
   // Connect and Validate Sheet
   if (btnConnectSheet) {
@@ -684,13 +713,31 @@ document.addEventListener('DOMContentLoaded', () => {
       const transSheet = transactionSheetSelect ? transactionSheetSelect.value : '';
       const errSheet = errorSheetSelect ? errorSheetSelect.value : '';
 
+      resetConnectButton();
+
       if (!selectedId) {
-        showToast(sheetsStatus, 'Lütfen bir E-Tablo dosyası seçin.', 'error');
+        const msg = 'Lütfen bir E-Tablo dosyası seçin.';
+        if (sheetsConnMsg) {
+          sheetsConnMsg.textContent = msg;
+          sheetsConnMsg.className = 'status-banner error';
+          sheetsConnMsg.classList.remove('hidden');
+        }
+        btnConnectSheet.classList.add('btn-connect-error');
+        btnConnectSheet.textContent = 'Bağlantı Hatası - Tekrar Dene';
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
         return;
       }
 
       if (!transSheet || !errSheet) {
-        showToast(sheetsStatus, 'Lütfen hem Transaction hem de Error Log sekmelerini seçin.', 'error');
+        const msg = 'Lütfen hem Transaction hem de Error Log sekmelerini seçin.';
+        if (sheetsConnMsg) {
+          sheetsConnMsg.textContent = msg;
+          sheetsConnMsg.className = 'status-banner error';
+          sheetsConnMsg.classList.remove('hidden');
+        }
+        btnConnectSheet.classList.add('btn-connect-error');
+        btnConnectSheet.textContent = 'Bağlantı Hatası - Tekrar Dene';
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
         return;
       }
 
@@ -705,14 +752,39 @@ document.addEventListener('DOMContentLoaded', () => {
         errorSheet: errSheet
       }, (response) => {
         btnConnectSheet.disabled = false;
-        btnConnectSheet.textContent = 'Tabloları Bağla ve Kontrol Et';
 
         if (response && response.success) {
-          showToast(sheetsStatus, 'E-Tablo sekmeleri başarıyla doğrulandı ve bağlandı!', 'success');
+          btnConnectSheet.classList.remove('btn-connect-error');
+          btnConnectSheet.classList.add('btn-connect-success');
+          btnConnectSheet.textContent = 'Tablolar Başarıyla Bağlandı ✓';
+
+          const successMsg = 'E-Tablo sekmeleri başarıyla doğrulandı ve bağlandı!';
+          if (sheetsConnMsg) {
+            sheetsConnMsg.textContent = successMsg;
+            sheetsConnMsg.className = 'status-banner success';
+            sheetsConnMsg.classList.remove('hidden');
+          }
+
           syncGoogleStatus();
+
+          setTimeout(() => {
+            window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+          }, 150);
         } else {
           const errorMsg = response?.error || 'Tablolar doğrulanamadı.';
-          showToast(sheetsStatus, errorMsg, 'error');
+          btnConnectSheet.classList.remove('btn-connect-success');
+          btnConnectSheet.classList.add('btn-connect-error');
+          btnConnectSheet.textContent = 'Bağlantı Hatası - Tekrar Dene';
+
+          if (sheetsConnMsg) {
+            sheetsConnMsg.textContent = errorMsg;
+            sheetsConnMsg.className = 'status-banner error';
+            sheetsConnMsg.classList.remove('hidden');
+          }
+
+          setTimeout(() => {
+            window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+          }, 150);
         }
       });
     });
@@ -726,6 +798,7 @@ document.addEventListener('DOMContentLoaded', () => {
           showToast(sheetsStatus, 'E-Tablo bağlantısı iptal edildi.', 'success');
           syncGoogleStatus();
           if (worksheetsContainer) worksheetsContainer.classList.add('hidden');
+          resetConnectButton();
         }
       });
     });

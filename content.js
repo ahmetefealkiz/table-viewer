@@ -16,6 +16,16 @@ let trackingState = {
   error: null
 };
 
+function setError(code, message) {
+  trackingState.errorCode = code;
+  trackingState.error = message;
+}
+
+function clearError() {
+  trackingState.errorCode = null;
+  trackingState.error = null;
+}
+
 // Load initial state from storage if present
 chrome.storage.local.get(['bankBotTrackingState'], (result) => {
   if (result.bankBotTrackingState) {
@@ -66,7 +76,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'CLEAR_DATA':
       trackingState.lastData = [];
       trackingState.lastUpdatedTime = null;
-      trackingState.error = null;
+      clearError();
       saveState();
       sendResponse({ success: true, state: trackingState });
       break;
@@ -74,7 +84,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'START_TRACKING':
       getSettings((settings) => {
         if (!isValidTargetUrl(settings.targetUrl)) {
-          trackingState.error = 'Ayarlar kısmında geçerli ve net bir Hedef URL tanımlanmamış. Sadece "http://" veya genel ifadeler kabul edilmez.';
+          setError('ERR_CFG_001', 'Ayarlar kısmında geçerli ve net bir Hedef URL tanımlanmamış. Sadece "http://" veya genel ifadeler kabul edilmez.');
           trackingState.isRunning = false;
           saveState();
           sendResponse({ success: false, error: trackingState.error, state: trackingState });
@@ -83,7 +93,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
         const accounts = getAccountList(settings);
         if (!accounts || accounts.length === 0) {
-          trackingState.error = 'Lütfen önce Ayarlar kısmından izlenecek hesap numaralarını girin.';
+          setError('ERR_CFG_003', 'Lütfen önce Ayarlar kısmından izlenecek hesap numaralarını girin.');
           trackingState.isRunning = false;
           saveState();
           sendResponse({ success: false, error: trackingState.error, state: trackingState });
@@ -96,7 +106,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         trackingState.currentPhase = 'IDLE';
         trackingState.currentAccountIndex = 0;
         trackingState.isRunning = true;
-        trackingState.error = null;
+        clearError();
 
         sessionStorage.setItem('isBankBotTracking', 'true');
         startTrackingEngine();
@@ -371,7 +381,7 @@ function processNextPhase(settings) {
   const targetAccounts = getAccountList(settings);
 
   if (!targetAccounts || targetAccounts.length === 0) {
-    trackingState.error = 'Lütfen önce Ayarlar kısmından izlenecek hesap numaralarını girin.';
+    setError('ERR_CFG_003', 'Lütfen önce Ayarlar kısmından izlenecek hesap numaralarını girin.');
     trackingState.isRunning = false;
     stopTrackingEngine();
     saveState();
@@ -529,7 +539,7 @@ function runDataScan(settings, onComplete) {
   const rawTarget = (settings.targetUrl || '').trim();
 
   if (!isValidTargetUrl(rawTarget)) {
-    trackingState.error = 'Ayarlar kısmında geçerli ve net bir Hedef URL tanımlanmamış. Lütfen geçerli bir URL girin (Örn: banka.com/hesap).';
+    setError('ERR_CFG_001', 'Ayarlar kısmında geçerli ve net bir Hedef URL tanımlanmamış. Lütfen geçerli bir URL girin (Örn: banka.com/hesap).');
     finish();
     return;
   }
@@ -539,7 +549,7 @@ function runDataScan(settings, onComplete) {
 
   // URL Containment Check
   if (!currentClean.includes(targetClean)) {
-    trackingState.error = `Mevcut URL ("${window.location.href}"), hedef URL'yi ("${settings.targetUrl}") kapsamıyor.`;
+    setError('ERR_CFG_002', `Mevcut URL ("${window.location.href}"), hedef URL'yi ("${settings.targetUrl}") kapsamıyor.`);
     finish();
     return;
   }
@@ -554,7 +564,7 @@ function runDataScan(settings, onComplete) {
   const headerMap = findColumnHeaderMap(targetHeaders);
 
   if (!headerMap.date && !headerMap.narration && !headerMap.ref && !headerMap.credit) {
-    trackingState.error = `Tablo içerisinde belirtilen başlıkların hiçbiri bulunamadı.`;
+    setError('ERR_DOM_002', 'Tablo içerisinde belirtilen başlıkların hiçbiri bulunamadı.');
     finish();
     return;
   }
@@ -577,12 +587,6 @@ function runDataScan(settings, onComplete) {
     }
   } catch (e) {}
 
-  if (!rowElements || rowElements.length === 0) {
-    trackingState.error = 'Tablo başlıkları bulundu fakat tablo veri satırları (rows) bulunamadı.';
-    finish();
-    return;
-  }
-
   // Extract Currency from Account Information modal (OD_CCY_CODE)
   let currencyVal = '';
   try {
@@ -598,11 +602,35 @@ function runDataScan(settings, onComplete) {
   }
 
   const dataList = [];
-  rowElements.forEach((row) => {
+  if (rowElements && rowElements.length > 0) {
+    rowElements.forEach((row) => {
+    const rowFullText = (row.innerText || row.textContent || '').toLowerCase().trim();
+    if (
+      rowFullText.includes('no records') ||
+      rowFullText.includes('no data') ||
+      rowFullText.includes('kayıt bulunamadı') ||
+      rowFullText.includes('veri bulunamadı') ||
+      rowFullText.includes('no display')
+    ) {
+      return; // Skip empty row indicators
+    }
+
     const dateText = extractCellValue(row, headerMap.date);
     const narrationText = extractCellValue(row, headerMap.narration);
     const refText = extractCellValue(row, headerMap.ref);
     const creditText = extractCellValue(row, headerMap.credit);
+
+    // Skip if row values match the table headers themselves
+    const isHeaderRow = (
+      (dateText && isTextMatch(dateText, targetHeaders.date)) ||
+      (narrationText && isTextMatch(narrationText, targetHeaders.narration)) ||
+      (refText && isTextMatch(refText, targetHeaders.ref)) ||
+      (creditText && isTextMatch(creditText, targetHeaders.credit))
+    );
+
+    if (isHeaderRow) {
+      return; // Skip header row
+    }
 
     if (dateText || narrationText || refText || creditText) {
       dataList.push({
@@ -614,17 +642,18 @@ function runDataScan(settings, onComplete) {
       });
     }
   });
+}
 
   trackingState.lastData = dataList;
   trackingState.lastUpdatedTime = new Date().toLocaleTimeString();
-  trackingState.error = null;
+  clearError();
 
   // Trigger Google Sheet Sync if data found
   if (dataList.length > 0) {
     chrome.runtime.sendMessage({ action: 'SYNC_TO_SHEET', dataList }, (response) => {
       if (!chrome.runtime.lastError && response) {
         if (!response.success && response.error) {
-          trackingState.error = response.error;
+          setError(response.errorCode || 'ERR_DAT_001', response.error);
         } else if (response.success && response.addedCount > 0) {
           trackingState.lastSyncMessage = response.message;
         }
@@ -643,7 +672,12 @@ function saveState() {
 
   if (trackingState.error && trackingState.error !== lastLoggedError) {
     lastLoggedError = trackingState.error;
-    chrome.runtime.sendMessage({ action: 'LOG_ERROR_TO_SHEET', errorMessage: trackingState.error }).catch(() => {});
+    const errorCode = trackingState.errorCode || 'ERR_SYS_000';
+    chrome.runtime.sendMessage({
+      action: 'LOG_ERROR_TO_SHEET',
+      errorCode: errorCode,
+      errorMessage: trackingState.error
+    }).catch(() => {});
   } else if (!trackingState.error) {
     lastLoggedError = null;
   }

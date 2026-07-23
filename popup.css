@@ -72,6 +72,34 @@
   }
 }
 
+/* Custom Hover-Only Scrollbars for Chrome Extension */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 9999px;
+  transition: background-color 0.2s ease;
+}
+
+body:hover::-webkit-scrollbar-thumb,
+html:hover::-webkit-scrollbar-thumb,
+.content-area:hover::-webkit-scrollbar-thumb,
+.table-container:hover::-webkit-scrollbar-thumb,
+textarea:hover::-webkit-scrollbar-thumb {
+  background: var(--border-element);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted) !important;
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -735,5 +763,65 @@ select:focus, .select-wrapper select:focus {
   background: var(--bg-subtle);
   border-radius: var(--radius-sm);
   border: 1px dashed var(--border-element);
+}
+
+/* Sheets Connect Button Success & Error States */
+.btn-connect-success {
+  background-color: #10b981 !important;
+  color: #ffffff !important;
+  border-color: #059669 !important;
+  box-shadow: 0 0 12px rgba(16, 185, 129, 0.4);
+}
+
+.btn-connect-error {
+  background-color: #ef4444 !important;
+  color: #ffffff !important;
+  border-color: #dc2626 !important;
+  box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+  animation: btn-error-shake 0.4s ease-in-out;
+}
+
+/* Floating Scroll Down Button Wrapper (Only visible when hovering directly over the bottom-right corner) */
+.btn-scroll-wrapper {
+  position: fixed;
+  bottom: 10px;
+  right: 10px;
+  width: 44px;
+  height: 44px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.btn-scroll-floating {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background-color: var(--accent);
+  color: var(--accent-contrast);
+  border: 1px solid var(--border-element);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(6px);
+  transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s ease, background-color 0.15s ease;
+}
+
+.btn-scroll-wrapper:hover .btn-scroll-floating {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0);
+}
+
+.btn-scroll-floating:hover {
+  background-color: var(--accent-hover);
+  transform: translateY(-2px) scale(1.08) !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35);
 }
 

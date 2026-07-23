@@ -35,7 +35,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
 
     case 'LOG_ERROR_TO_SHEET':
-      logErrorToSheet(request.errorMessage, sendResponse);
+      logErrorToSheet(request.errorCode, request.errorMessage, sendResponse);
       return true;
   }
 });
@@ -234,13 +234,15 @@ function validateAndConnectSheet(spreadsheetId, spreadsheetName, transactionShee
         if (!errRows || errRows.length === 0 || !errRows[0]) {
           throw new Error(`'${errorSheet}' sekmesinin ilk satırında başlık bulunamadı.`);
         }
-        const errHeaders = errRows[0].map(h => (h || '').toString().trim().toLowerCase());
-        const REQUIRED_ERR = ['timestamp', 'error detail'];
-        const missingErr = REQUIRED_ERR.filter(req => !errHeaders.includes(req));
+        const errHeaders = errRows[0].map(h => (h || '').toString().trim().toLowerCase().replace(/[\s_]+/g, '_'));
+        const missingErr = [];
+
+        if (!errHeaders.includes('timestamp')) missingErr.push('TIMESTAMP');
+        if (!errHeaders.includes('error_code')) missingErr.push('ERROR_CODE');
+        if (!errHeaders.includes('error_details') && !errHeaders.includes('error_detail')) missingErr.push('ERROR_DETAILS');
 
         if (missingErr.length > 0) {
-          const capMissing = missingErr.map(m => m === 'timestamp' ? 'Timestamp' : 'Error Detail');
-          throw new Error(`Error Log sekmesinde ('${errorSheet}') zorunlu kolon(lar) bulunamadı: ${capMissing.join(', ')}.\nLütfen ilk satıra Timestamp ve Error Detail başlıklarını ekleyin.`);
+          throw new Error(`Error Log sekmesinde ('${errorSheet}') zorunlu kolon(lar) bulunamadı: ${missingErr.join(', ')}.\nLütfen ilk satıra TIMESTAMP, ERROR_CODE ve ERROR_DETAILS başlıklarını ekleyin.`);
         }
 
         // Save selected sheet details
@@ -414,6 +416,7 @@ function syncDataToSheet(dataList, sendResponse) {
               const currencyName = (dataList[0]?.currency || '').toUpperCase();
               sendResponse({
                 success: false,
+                errorCode: 'ERR_DAT_002',
                 error: `E-Tablodaki ${currencyName ? currencyName + ' para birimine ait ' : ''}son kaydedilmiş işlem web sayfasında bulunamadı. Lütfen web sayfasındaki listeleme filtresini 'son 7 gün'den 'son 1 ay'a (veya daha geniş bir aralığa) güncelleyip tekrar okutun.`
               });
               return;
@@ -476,13 +479,15 @@ function syncDataToSheet(dataList, sendResponse) {
 }
 
 /**
- * Sync error details to Error Log Worksheet
+ * Sync error details (Timestamp, Error Code, Error Details) to Error Log Worksheet
  */
-function logErrorToSheet(errorMessage, sendResponse) {
+function logErrorToSheet(errorCode, errorMessage, sendResponse) {
   if (!errorMessage) {
     if (sendResponse) sendResponse({ success: false, error: 'Hata mesajı boş.' });
     return;
   }
+
+  const code = errorCode || 'ERR_SYS_000';
 
   chrome.storage.local.get(['bankBotSelectedSheet'], (result) => {
     const sheetData = result.bankBotSelectedSheet;
@@ -506,22 +511,27 @@ function logErrorToSheet(errorMessage, sendResponse) {
         .then(async data => {
           const values = data.values || [];
           let timestampIdx = 0;
-          let errorDetailIdx = 1;
-          let colCount = 2;
+          let errorCodeIdx = 1;
+          let errorDetailsIdx = 2;
+          let colCount = 3;
 
           if (values.length > 0 && values[0]) {
-            const headerRow = values[0].map(h => (h || '').toString().trim().toLowerCase());
+            const headerRow = values[0].map(h => (h || '').toString().trim().toLowerCase().replace(/[\s_]+/g, '_'));
             const tIdx = headerRow.indexOf('timestamp');
-            const eIdx = headerRow.indexOf('error detail');
+            const cIdx = headerRow.indexOf('error_code');
+            const dIdx = headerRow.findIndex(h => h === 'error_details' || h === 'error_detail');
+
             if (tIdx !== -1) timestampIdx = tIdx;
-            if (eIdx !== -1) errorDetailIdx = eIdx;
-            colCount = Math.max(headerRow.length, 2);
+            if (cIdx !== -1) errorCodeIdx = cIdx;
+            if (dIdx !== -1) errorDetailsIdx = dIdx;
+            colCount = Math.max(headerRow.length, 3);
           }
 
           const currentTimestamp = getFormattedTimestamp();
           const row = new Array(colCount).fill('');
           row[timestampIdx] = currentTimestamp;
-          row[errorDetailIdx] = errorMessage.toString();
+          row[errorCodeIdx] = code;
+          row[errorDetailsIdx] = errorMessage.toString();
 
           const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'${encodeURIComponent(errorSheet)}'!1:1:append?valueInputOption=USER_ENTERED`;
 
