@@ -655,19 +655,38 @@ function runDataScan(settings, onComplete) {
   trackingState.lastUpdatedTime = new Date().toLocaleTimeString();
   clearError();
 
+  const logSuccessActivity = (count) => {
+    if (trackingState.error) return;
+
+    const targetAccounts = getAccountList(settings);
+    const currentAccNum = targetAccounts && targetAccounts[trackingState.currentAccountIndex] ? targetAccounts[trackingState.currentAccountIndex] : '';
+    const accTypeStr = currencyVal || currentAccNum || 'GENEL';
+    const activityText = `${accTypeStr} hesabına girildi, rutin işlemler yapıldı ve veriler okundu (${count} işlem okundu).`;
+
+    chrome.runtime.sendMessage({
+      action: 'LOG_ACTIVITY_TO_SHEET',
+      accountType: accTypeStr,
+      activity: activityText
+    }).catch(() => {});
+  };
+
   // Trigger Google Sheet Sync if data found
   if (dataList.length > 0) {
     chrome.runtime.sendMessage({ action: 'SYNC_TO_SHEET', dataList }, (response) => {
       if (!chrome.runtime.lastError && response) {
         if (!response.success && response.error) {
           setError(response.errorCode || 'ERR_DAT_001', response.error);
-        } else if (response.success && response.addedCount > 0) {
-          trackingState.lastSyncMessage = response.message;
+        } else if (response.success) {
+          if (response.addedCount > 0) {
+            trackingState.lastSyncMessage = response.message;
+          }
+          logSuccessActivity(dataList.length);
         }
       }
       finish();
     });
   } else {
+    logSuccessActivity(0);
     finish();
   }
 }

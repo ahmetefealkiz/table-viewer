@@ -19,7 +19,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       return true;
 
     case 'VALIDATE_AND_CONNECT_SHEET':
-      validateAndConnectSheet(request.spreadsheetId, request.spreadsheetName, request.transactionSheet, request.errorSheet, sendResponse);
+      validateAndConnectSheet(request.spreadsheetId, request.spreadsheetName, request.transactionSheet, request.errorSheet, request.activitySheet, sendResponse);
       return true;
 
     case 'DISCONNECT_SHEET':
@@ -36,6 +36,10 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     case 'LOG_ERROR_TO_SHEET':
       logErrorToSheet(request.errorCode, request.errorMessage, sendResponse);
+      return true;
+
+    case 'LOG_ACTIVITY_TO_SHEET':
+      logActivityToSheet(request.accountType, request.activity, sendResponse);
       return true;
   }
 });
@@ -185,9 +189,12 @@ function fetchWorksheets(spreadsheetId, sendResponse) {
 /**
  * Validate Columns in Selected Transaction and Error Worksheets
  */
-function validateAndConnectSheet(spreadsheetId, spreadsheetName, transactionSheet, errorSheet, sendResponse) {
-  if (!spreadsheetId || !transactionSheet || !errorSheet) {
-    sendResponse({ success: false, error: 'Lütfen hem Transaction hem de Error Log sayfalarını (sekmelerini) seçin.' });
+/**
+ * Validate Columns in Selected Transaction, Error and Activity Worksheets
+ */
+function validateAndConnectSheet(spreadsheetId, spreadsheetName, transactionSheet, errorSheet, activitySheet, sendResponse) {
+  if (!spreadsheetId || !transactionSheet || !errorSheet || !activitySheet) {
+    sendResponse({ success: false, error: 'Lütfen Transaction, Error Log ve Activity Log sayfalarının (sekmelerinin) tümünü seçin.' });
     return;
   }
 
@@ -229,7 +236,7 @@ function validateAndConnectSheet(spreadsheetId, spreadsheetName, transactionShee
         if (!res.ok) throw new Error(`Error Log sekmesi okunamadı: ${res.statusText}`);
         return res.json();
       })
-      .then(async errData => {
+      .then(errData => {
         const errRows = errData.values;
         if (!errRows || errRows.length === 0 || !errRows[0]) {
           throw new Error(`'${errorSheet}' sekmesinin ilk satırında başlık bulunamadı.`);
@@ -245,12 +252,38 @@ function validateAndConnectSheet(spreadsheetId, spreadsheetName, transactionShee
           throw new Error(`Error Log sekmesinde ('${errorSheet}') zorunlu kolon(lar) bulunamadı: ${missingErr.join(', ')}.\nLütfen ilk satıra TIMESTAMP, ERROR_CODE ve ERROR_DETAILS başlıklarını ekleyin.`);
         }
 
+        // 3. Validate Activity Sheet Headers
+        const activityUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'${encodeURIComponent(activitySheet)}'!1:1`;
+        return fetch(activityUrl, { headers: { Authorization: `Bearer ${token}` } });
+      })
+      .then(res => {
+        if (res.status === 401) throw new Error('Oturum süresi doldu. Lütfen tekrar giriş yapın.');
+        if (!res.ok) throw new Error(`Activity Log sekmesi okunamadı: ${res.statusText}`);
+        return res.json();
+      })
+      .then(async actData => {
+        const actRows = actData.values;
+        if (!actRows || actRows.length === 0 || !actRows[0]) {
+          throw new Error(`'${activitySheet}' sekmesinin ilk satırında başlık bulunamadı.`);
+        }
+        const actHeaders = actRows[0].map(h => (h || '').toString().trim().toLowerCase().replace(/[\s_]+/g, '_'));
+        const missingAct = [];
+
+        if (!actHeaders.includes('timestamp')) missingAct.push('TIMESTAMP');
+        if (!actHeaders.includes('account_type')) missingAct.push('ACCOUNT_TYPE');
+        if (!actHeaders.includes('activity')) missingAct.push('ACTIVITY');
+
+        if (missingAct.length > 0) {
+          throw new Error(`Activity Log sekmesinde ('${activitySheet}') zorunlu kolon(lar) bulunamadı: ${missingAct.join(', ')}.\nLütfen ilk satıra TIMESTAMP, ACCOUNT_TYPE ve ACTIVITY başlıklarını ekleyin.`);
+        }
+
         // Save selected sheet details
         const selectedSheetData = {
           id: spreadsheetId,
           name: spreadsheetName,
           transactionSheet: transactionSheet,
           errorSheet: errorSheet,
+          activitySheet: activitySheet,
           connectedAt: new Date().toLocaleString()
         };
 
@@ -546,6 +579,85 @@ function logErrorToSheet(errorCode, errorMessage, sendResponse) {
 
           if (!appendRes.ok) {
             throw new Error(`Error log kaydetme hatası: ${appendRes.statusText}`);
+          }
+
+          if (sendResponse) sendResponse({ success: true });
+        })
+        .catch(error => {
+          if (sendResponse) sendResponse({ success: false, error: error.message });
+        });
+    });
+  });
+}
+
+/**
+ * Sync activity details (Timestamp, Account Type, Activity) to Activity Log Worksheet
+ */
+function logActivityToSheet(accountType, activity, sendResponse) {
+  if (!activity) {
+    if (sendResponse) sendResponse({ success: false, error: 'Aktivite açıklaması boş.' });
+    return;
+  }
+
+  const accType = accountType || 'GENEL';
+
+  chrome.storage.local.get(['bankBotSelectedSheet'], (result) => {
+    const sheetData = result.bankBotSelectedSheet;
+    if (!sheetData || !sheetData.id || !sheetData.activitySheet) {
+      if (sendResponse) sendResponse({ success: false, error: 'Bağlı Activity Log sekmesi bulunamadı.' });
+      return;
+    }
+
+    getToken((token, err) => {
+      if (err || !token) {
+        if (sendResponse) sendResponse({ success: false, error: err || 'Oturum açık değil.' });
+        return;
+      }
+
+      const spreadsheetId = sheetData.id;
+      const activitySheet = sheetData.activitySheet;
+      const url = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'${encodeURIComponent(activitySheet)}'!1:100`;
+
+      fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+        .then(res => res.json())
+        .then(async data => {
+          const values = data.values || [];
+          let timestampIdx = 0;
+          let accountTypeIdx = 1;
+          let activityIdx = 2;
+          let colCount = 3;
+
+          if (values.length > 0 && values[0]) {
+            const headerRow = values[0].map(h => (h || '').toString().trim().toLowerCase().replace(/[\s_]+/g, '_'));
+            const tIdx = headerRow.indexOf('timestamp');
+            const aTypeIdx = headerRow.indexOf('account_type');
+            const actIdx = headerRow.indexOf('activity');
+
+            if (tIdx !== -1) timestampIdx = tIdx;
+            if (aTypeIdx !== -1) accountTypeIdx = aTypeIdx;
+            if (actIdx !== -1) activityIdx = actIdx;
+            colCount = Math.max(headerRow.length, 3);
+          }
+
+          const currentTimestamp = getFormattedTimestamp();
+          const row = new Array(colCount).fill('');
+          row[timestampIdx] = currentTimestamp;
+          row[accountTypeIdx] = accType;
+          row[activityIdx] = activity.toString();
+
+          const appendUrl = `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/'${encodeURIComponent(activitySheet)}'!1:1:append?valueInputOption=USER_ENTERED`;
+
+          const appendRes = await fetch(appendUrl, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ values: [row] })
+          });
+
+          if (!appendRes.ok) {
+            throw new Error(`Activity log kaydetme hatası: ${appendRes.statusText}`);
           }
 
           if (sendResponse) sendResponse({ success: true });

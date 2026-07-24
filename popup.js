@@ -461,12 +461,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const worksheetsContainer = document.getElementById('worksheets-container');
   const transactionSheetSelect = document.getElementById('transaction-sheet-select');
   const errorSheetSelect = document.getElementById('error-sheet-select');
+  const activitySheetSelect = document.getElementById('activity-sheet-select');
   const btnConnectSheet = document.getElementById('btn-connect-sheet');
 
   const connectedSheetInfo = document.getElementById('connected-sheet-info');
   const connectedSheetName = document.getElementById('connected-sheet-name');
   const connectedTransactionName = document.getElementById('connected-transaction-name');
   const connectedErrorName = document.getElementById('connected-error-name');
+  const connectedActivityName = document.getElementById('connected-activity-name');
   const connectedSheetDate = document.getElementById('connected-sheet-date');
   const btnDisconnectSheet = document.getElementById('btn-disconnect-sheet');
   const sheetsStatus = document.getElementById('sheets-status');
@@ -505,12 +507,14 @@ document.addEventListener('DOMContentLoaded', () => {
       connectedSheetName.textContent = sheet.name || 'Bilinmeyen Tablo';
       if (connectedTransactionName) connectedTransactionName.textContent = sheet.transactionSheet || 'Bilinmiyor';
       if (connectedErrorName) connectedErrorName.textContent = sheet.errorSheet || 'Bilinmiyor';
+      if (connectedActivityName) connectedActivityName.textContent = sheet.activitySheet || 'Bilinmiyor';
       connectedSheetDate.textContent = sheet.connectedAt || '--';
     } else {
       connectedSheetInfo.classList.add('hidden');
       connectedSheetName.textContent = '--';
       if (connectedTransactionName) connectedTransactionName.textContent = '--';
       if (connectedErrorName) connectedErrorName.textContent = '--';
+      if (connectedActivityName) connectedActivityName.textContent = '--';
       connectedSheetDate.textContent = '--';
     }
   }
@@ -613,6 +617,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (transactionSheetSelect) transactionSheetSelect.innerHTML = `<option value="">Sekmeler yükleniyor...</option>`;
     if (errorSheetSelect) errorSheetSelect.innerHTML = `<option value="">Sekmeler yükleniyor...</option>`;
+    if (activitySheetSelect) activitySheetSelect.innerHTML = `<option value="">Sekmeler yükleniyor...</option>`;
     if (worksheetsContainer) worksheetsContainer.classList.remove('hidden');
 
     chrome.runtime.sendMessage({ action: 'FETCH_WORKSHEETS', spreadsheetId }, (response) => {
@@ -622,16 +627,19 @@ document.addEventListener('DOMContentLoaded', () => {
         showToast(sheetsStatus, errorMsg, 'error');
         if (transactionSheetSelect) transactionSheetSelect.innerHTML = `<option value="">-- Hata (${errorMsg}) --</option>`;
         if (errorSheetSelect) errorSheetSelect.innerHTML = `<option value="">-- Hata (${errorMsg}) --</option>`;
+        if (activitySheetSelect) activitySheetSelect.innerHTML = `<option value="">-- Hata (${errorMsg}) --</option>`;
         return;
       }
 
       const sheets = response.sheets || [];
       let transOptions = `<option value="">-- Transaction sekmesi seçin --</option>`;
       let errOptions = `<option value="">-- Error Log sekmesi seçin --</option>`;
+      let actOptions = `<option value="">-- Activity Log sekmesi seçin --</option>`;
 
       sheets.forEach((sheetName, index) => {
         let isTransSelected = false;
         let isErrSelected = false;
+        let isActSelected = false;
 
         if (connectedData && connectedData.transactionSheet) {
           isTransSelected = sheetName === connectedData.transactionSheet;
@@ -645,12 +653,25 @@ document.addEventListener('DOMContentLoaded', () => {
           isErrSelected = index === 1 || (sheets.length === 1 && index === 0);
         }
 
+        if (connectedData && connectedData.activitySheet) {
+          isActSelected = sheetName === connectedData.activitySheet;
+        } else {
+          const lower = sheetName.toLowerCase();
+          if (lower.includes('activity') || lower.includes('etkinlik') || lower.includes('aktivite')) {
+            isActSelected = true;
+          } else {
+            isActSelected = index === 2 || (sheets.length <= 2 && index === 0);
+          }
+        }
+
         transOptions += `<option value="${sheetName}" ${isTransSelected ? 'selected' : ''}>${sheetName}</option>`;
         errOptions += `<option value="${sheetName}" ${isErrSelected ? 'selected' : ''}>${sheetName}</option>`;
+        actOptions += `<option value="${sheetName}" ${isActSelected ? 'selected' : ''}>${sheetName}</option>`;
       });
 
       if (transactionSheetSelect) transactionSheetSelect.innerHTML = transOptions;
       if (errorSheetSelect) errorSheetSelect.innerHTML = errOptions;
+      if (activitySheetSelect) activitySheetSelect.innerHTML = actOptions;
     });
   }
 
@@ -698,7 +719,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Reset button state when dropdown selection changes
-  [sheetsSelect, transactionSheetSelect, errorSheetSelect].forEach(selectEl => {
+  [sheetsSelect, transactionSheetSelect, errorSheetSelect, activitySheetSelect].forEach(selectEl => {
     if (selectEl) {
       selectEl.addEventListener('change', resetConnectButton);
     }
@@ -712,6 +733,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const selectedName = selectedOption ? selectedOption.textContent : '';
       const transSheet = transactionSheetSelect ? transactionSheetSelect.value : '';
       const errSheet = errorSheetSelect ? errorSheetSelect.value : '';
+      const actSheet = activitySheetSelect ? activitySheetSelect.value : '';
 
       resetConnectButton();
 
@@ -728,8 +750,8 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      if (!transSheet || !errSheet) {
-        const msg = 'Lütfen hem Transaction hem de Error Log sekmelerini seçin.';
+      if (!transSheet || !errSheet || !actSheet) {
+        const msg = 'Lütfen Transaction, Error Log ve Activity Log sekmelerinin tümünü seçin.';
         if (sheetsConnMsg) {
           sheetsConnMsg.textContent = msg;
           sheetsConnMsg.className = 'status-banner error';
@@ -749,7 +771,8 @@ document.addEventListener('DOMContentLoaded', () => {
         spreadsheetId: selectedId,
         spreadsheetName: selectedName,
         transactionSheet: transSheet,
-        errorSheet: errSheet
+        errorSheet: errSheet,
+        activitySheet: actSheet
       }, (response) => {
         btnConnectSheet.disabled = false;
 
