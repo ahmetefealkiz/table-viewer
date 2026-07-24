@@ -41,6 +41,20 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     case 'LOG_ACTIVITY_TO_SHEET':
       logActivityToSheet(request.accountType, request.activity, sendResponse);
       return true;
+
+    case 'OFFSCREEN_TICK':
+      handleOffscreenTick();
+      return true;
+
+    case 'ENSURE_OFFSCREEN':
+      ensureOffscreenDocument();
+      if (sendResponse) sendResponse({ success: true });
+      return true;
+
+    case 'CLOSE_OFFSCREEN':
+      closeOffscreenDocument();
+      if (sendResponse) sendResponse({ success: true });
+      return true;
   }
 });
 
@@ -754,3 +768,62 @@ chrome.runtime.onConnect.addListener((port) => {
     });
   }
 });
+
+/**
+ * Offscreen API Document Engine & Management
+ */
+function handleOffscreenTick() {
+  chrome.storage.local.get(['bankBotTrackingState'], (result) => {
+    const state = result.bankBotTrackingState;
+    if (state && state.isRunning) {
+      chrome.tabs.query({}, (tabs) => {
+        tabs.forEach((tab) => {
+          if (tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://'))) {
+            chrome.tabs.sendMessage(tab.id, { action: 'OFFSCREEN_TICK' }).catch(() => {});
+          }
+        });
+      });
+    }
+  });
+}
+
+async function ensureOffscreenDocument() {
+  if (!chrome.offscreen) return;
+  try {
+    const hasDoc = await chrome.offscreen.hasDocument();
+    if (!hasDoc) {
+      await chrome.offscreen.createDocument({
+        url: 'offscreen.html',
+        reasons: ['DOM_SCRAPING'],
+        justification: 'Unthrottled timer engine for background transaction tracking'
+      });
+    }
+  } catch (err) {
+    if (!err.message?.includes('Only a single offscreen document may be created')) {
+      console.error('Offscreen document creation error:', err);
+    }
+  }
+}
+
+async function closeOffscreenDocument() {
+  if (!chrome.offscreen) return;
+  try {
+    const hasDoc = await chrome.offscreen.hasDocument();
+    if (hasDoc) {
+      await chrome.offscreen.closeDocument();
+    }
+  } catch (err) {
+    console.error('Offscreen document close error:', err);
+  }
+}
+
+// Auto-manage offscreen document based on tracking state changes
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === 'local' && changes.bankBotTrackingState) {
+    const newState = changes.bankBotTrackingState.newValue;
+    if (newState && newState.isRunning) {
+      ensureOffscreenDocument();
+    }
+  }
+});
+

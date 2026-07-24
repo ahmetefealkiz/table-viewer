@@ -74,10 +74,17 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       break;
 
     case 'PING':
-      if (trackingState.isRunning && sessionStorage.getItem('isBankBotTracking') === 'true' && !trackingTimer) {
+      if (trackingState.isRunning && sessionStorage.getItem('isBankBotTracking') === 'true') {
         startTrackingEngine();
       }
       sendResponse({ success: true, isRunning: trackingState.isRunning });
+      break;
+
+    case 'OFFSCREEN_TICK':
+      if (trackingState.isRunning && sessionStorage.getItem('isBankBotTracking') === 'true') {
+        handleTick();
+      }
+      sendResponse({ success: true });
       break;
 
     case 'CLEAR_DATA':
@@ -498,6 +505,31 @@ function processNextPhase(settings) {
   saveState();
 }
 
+let lastTickTime = 0;
+
+function handleTick() {
+  const now = Date.now();
+  if (now - lastTickTime < 800) {
+    return; // Prevent duplicate execution within 800ms
+  }
+  lastTickTime = now;
+
+  if (!trackingState.isRunning || sessionStorage.getItem('isBankBotTracking') !== 'true') {
+    return;
+  }
+
+  trackingState.secondsLeft--;
+
+  if (trackingState.secondsLeft <= 0) {
+    getSettings((settings) => {
+      if (!trackingState.isRunning) return;
+      processNextPhase(settings);
+    });
+  } else {
+    saveState();
+  }
+}
+
 function startTrackingEngine() {
   stopTrackingEngine();
   
@@ -507,22 +539,15 @@ function startTrackingEngine() {
 
   trackingState.isRunning = true;
 
+  // Ensure Offscreen Document is running in background
+  chrome.runtime.sendMessage({ action: 'ENSURE_OFFSCREEN' }).catch(() => {});
+
   trackingTimer = setInterval(() => {
     if (!trackingState.isRunning) {
       stopTrackingEngine();
       return;
     }
-
-    trackingState.secondsLeft--;
-
-    if (trackingState.secondsLeft <= 0) {
-      getSettings((settings) => {
-        if (!trackingState.isRunning) return;
-        processNextPhase(settings);
-      });
-    } else {
-      saveState();
-    }
+    handleTick();
   }, 1000);
 }
 
@@ -532,6 +557,7 @@ function stopTrackingEngine() {
     trackingTimer = null;
   }
   trackingState.isRunning = false;
+  chrome.runtime.sendMessage({ action: 'CLOSE_OFFSCREEN' }).catch(() => {});
 }
 
 function runDataScan(settings, onComplete) {

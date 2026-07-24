@@ -10,13 +10,14 @@
     "scripting",
     "identity",
     "alarms",
-    "power"
+    "power",
+    "offscreen"
   ],
   "background": {
     "service_worker": "background.js"
   },
   "oauth2": {
-    "client_id": "240954843860-kns2986tkseu8q4e0d1vshnrsn0f2850.apps.googleusercontent.com",
+    "client_id": "240954843860-n46tbm2epkbn5fae46f1qri3b4s7t3af.apps.googleusercontent.com",
     "scopes": [
       "https://www.googleapis.com/auth/userinfo.email",
       "https://www.googleapis.com/auth/drive.readonly",
