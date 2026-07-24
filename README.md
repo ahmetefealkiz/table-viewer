@@ -6,6 +6,7 @@ Bu proje, banka web arayüzlerinden hesap ve işlem (hareket) verilerini otomati
 
 ## 📌 İçindekiler
 - [Mimari ve Çalışma Mekanizması](#-mimari-ve-çalışma-mekanizması)
+- [Kesintisiz Çalışma (Anti-Sleep / Keep-Alive)](#-kesintisiz-çalışma-anti-sleep--keep-alive)
 - [Proje Yapısı](#-proje-yapısı)
 - [Kurulum ve Çalıştırma](#-kurulum-ve-çalıştırma)
   - [1. Chrome Uzantısının Yüklenmesi](#1-chrome-uzantısının-yüklenmesi)
@@ -50,8 +51,7 @@ Sistem 3 temel uzantı katmanından oluşmaktadır:
 * Google OAuth2 oturum açma yetkilendirmelerini yönetir (`chrome.identity`).
 * Google Sheets API v4 üzerinden bağlı E-Tabloya bağlanır.
 * **Mükerrer Veri Kontrolü:** Eklenen işlemlerin **Referans (REF)** numaralarını kontrol ederek mükerrer kayıt atılmasını engeller. E-Tablo'daki son işlem web sayfasında bulunamazsa `ERR_DAT_002` hatası üretir.
-* Otomatik arka plan izleme (interval) zamanlayıcılarını yönetir.
-* Sistemde bir hata oluştuğunda bu hatayı **Error Log** sekmesine yazar (`TIMESTAMP | ERROR_CODE | ERROR_DETAILS`).
+* **Kesintisiz Çalışma (Anti-Sleep Engine):** Chrome Manifest V3 service worker'larının 30 saniye sonra uyumasını / durmasını engeller.
 
 ### 3. Popup Arayüzü (`popup.html` & `popup.js`)
 * Kullanıcının izlenecek hesap numaralarını, hedef URL'yi, tablo başlık isimlerini ve yenileme sıklığını ayarlamasını sağlar.
@@ -60,16 +60,26 @@ Sistem 3 temel uzantı katmanından oluşmaktadır:
 
 ---
 
+## ⏰ Kesintisiz Çalışma (Anti-Sleep / Keep-Alive)
+
+Chrome Manifest V3 mimarisinde background servisleri (Service Worker) 30 saniye boşta kaldığında Chrome tarafından uyutulmaktadır. Botun 7/24 kesintisiz çalışması için 3 aşamalı **Keep-Alive** sistemi uygulanmıştır:
+
+1. **`chrome.alarms` Zamanlayıcısı:** Her 30 saniyede bir tetiklenen arka plan alarmı ile Service Worker uyanık tutulur ve aktif izleme durumu denetlenir.
+2. **Port Heartbeat (Kalp Atışı):** `content.js` ile `background.js` arasında sürekli açık tutulan `chrome.runtime.connect` portu üzerinden 20 saniyede bir ping atılır.
+3. **Otomatik Yeniden Başlatma (Tab Wakeup):** Sekme yenilense veya tarayıcı arka plana geçse bile `sessionStorage` ve `chrome.storage.local` üzerinden izleme motoru otomatik olarak kaldığı yerden devam eder.
+
+---
+
 ## 📁 Proje Yapısı
 
 ```bash
 extension/                       # Chrome Uzantısı (Manifest V3)
-├── manifest.json                # Uzantı konfigürasyonu ve yetkileri
+├── manifest.json                # Uzantı konfigürasyonu ve yetkileri (alarms yetkisi dahil)
 ├── popup.html                   # Uzantı kullanıcı arayüzü
 ├── popup.css                    # Arayüz stilleri
 ├── popup.js                     # Arayüz mantığı ve kullanıcı etkileşimleri
-├── content.js                   # Web kazıma (Scraping) ve DOM manipülasyonu
-└── background.js                # Service worker, Google API & arka plan servisleri
+├── content.js                   # Web kazıma (Scraping), DOM manipülasyonu & Port Heartbeat
+└── background.js                # Service worker, Google API, Keep-Alive Alarms & arka plan servisleri
 ```
 
 ---

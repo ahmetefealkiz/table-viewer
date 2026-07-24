@@ -573,3 +573,60 @@ function isRowMatch(item, lastRecordedObj) {
 
   return itemRef === targetRef;
 }
+
+/**
+ * Service Worker Keep-Alive & Anti-Sleep Engine (Manifest V3)
+ * Prevents background service worker from sleeping / dying by utilizing:
+ * 1. chrome.alarms periodic pings (every 30s)
+ * 2. Port connection heartbeat from content scripts (every 20s)
+ * 3. Automatic tab wakeup & state persistence
+ */
+function setupKeepAliveAlarm() {
+  chrome.alarms.get('bankBotKeepAlive', (alarm) => {
+    if (!alarm) {
+      chrome.alarms.create('bankBotKeepAlive', { periodInMinutes: 0.5 });
+    }
+  });
+}
+
+chrome.runtime.onInstalled.addListener(() => {
+  setupKeepAliveAlarm();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  setupKeepAliveAlarm();
+});
+
+// Ensure alarm is created on startup / load
+setupKeepAliveAlarm();
+
+// Fire on alarm: Wake up service worker, check state, and ping open tabs
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === 'bankBotKeepAlive') {
+    chrome.storage.local.get(['bankBotTrackingState'], (result) => {
+      const state = result.bankBotTrackingState;
+      if (state && state.isRunning) {
+        chrome.tabs.query({}, (tabs) => {
+          tabs.forEach((tab) => {
+            if (tab.url && (tab.url.startsWith('http://') || tab.url.startsWith('https://'))) {
+              chrome.tabs.sendMessage(tab.id, { action: 'PING' }).catch(() => {});
+            }
+          });
+        });
+      }
+    });
+  }
+});
+
+// Keep-Alive Long-Lived Port listener to keep SW active when tab is open
+chrome.runtime.onConnect.addListener((port) => {
+  if (port.name === 'bankBotKeepAlive') {
+    port.onMessage.addListener((msg) => {
+      if (msg && msg.ping) {
+        try {
+          port.postMessage({ pong: true });
+        } catch (e) {}
+      }
+    });
+  }
+});

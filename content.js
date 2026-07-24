@@ -73,6 +73,13 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       sendResponse({ success: true, state: trackingState });
       break;
 
+    case 'PING':
+      if (trackingState.isRunning && sessionStorage.getItem('isBankBotTracking') === 'true' && !trackingTimer) {
+        startTrackingEngine();
+      }
+      sendResponse({ success: true, isRunning: trackingState.isRunning });
+      break;
+
     case 'CLEAR_DATA':
       trackingState.lastData = [];
       trackingState.lastUpdatedTime = null;
@@ -775,3 +782,31 @@ function extractCellValue(row, headerInfo) {
   if (!cellEl) return '';
   return (cellEl.innerText || cellEl.textContent || '').replace(/\s+/g, ' ').trim();
 }
+
+// --- Keep-Alive Heartbeat for Background Service Worker (Prevents Manifest V3 Idle Sleep) ---
+let keepAlivePort = null;
+
+function connectKeepAlivePort() {
+  try {
+    keepAlivePort = chrome.runtime.connect({ name: 'bankBotKeepAlive' });
+    keepAlivePort.onDisconnect.addListener(() => {
+      keepAlivePort = null;
+      setTimeout(connectKeepAlivePort, 1000);
+    });
+  } catch (e) {}
+}
+
+connectKeepAlivePort();
+
+// Send heartbeat ping every 20 seconds to prevent Manifest V3 Service Worker 30s idle sleep
+setInterval(() => {
+  if (keepAlivePort) {
+    try {
+      keepAlivePort.postMessage({ ping: true });
+    } catch (e) {
+      connectKeepAlivePort();
+    }
+  } else {
+    connectKeepAlivePort();
+  }
+}, 20000);
