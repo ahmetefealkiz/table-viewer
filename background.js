@@ -587,6 +587,11 @@ function setupKeepAliveAlarm() {
       chrome.alarms.create('bankBotKeepAlive', { periodInMinutes: 0.5 });
     }
   });
+
+  // Request system CPU to stay awake even when screen is locked or turned off
+  if (chrome.power) {
+    chrome.power.requestKeepAwake('system');
+  }
 }
 
 chrome.runtime.onInstalled.addListener(() => {
@@ -603,6 +608,9 @@ setupKeepAliveAlarm();
 // Fire on alarm: Wake up service worker, check state, and ping open tabs
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'bankBotKeepAlive') {
+    if (chrome.power) {
+      chrome.power.requestKeepAwake('system');
+    }
     chrome.storage.local.get(['bankBotTrackingState'], (result) => {
       const state = result.bankBotTrackingState;
       if (state && state.isRunning) {
@@ -613,6 +621,10 @@ chrome.alarms.onAlarm.addListener((alarm) => {
             }
           });
         });
+      } else if (state && !state.isRunning) {
+        if (chrome.power) {
+          chrome.power.releaseKeepAwake();
+        }
       }
     });
   }
